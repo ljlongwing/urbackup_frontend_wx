@@ -202,20 +202,38 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 	}
 
 	SServerList server_list = Connector::getServerList();
+	//The selected server has not sent its settings to this client yet
+	bool settings_not_received = false;
 	if (server_list.supported)
 	{
 		primary_server = server_list.primary;
-		selected_server = server_ident.empty() ? primary_server : server_ident;
-
-		if (!selected_server.empty()
-			&& selected_server != primary_server)
+		selected_server = server_ident;
+		if (selected_server.empty())
 		{
-			//Backup settings of another server than the primary one
+			selected_server = primary_server;
+		}
+		if (selected_server.empty())
+		{
+			//No server sent settings yet. Show the first one
+			for (size_t i = 0; i < server_list.entries.size() && selected_server.empty(); ++i)
+				selected_server = server_list.entries[i].ident;
+		}
+
+		if (!selected_server.empty())
+		{
 			std::string srv_fn = settingsFilePath("settings_srv_" + selected_server + ".cfg");
 			if (wxFileExists(wxString::FromUTF8(srv_fn.c_str())))
 			{
-				delete settings;
-				settings = new CFileSettingsReader(srv_fn);
+				if (selected_server != primary_server)
+				{
+					//Backup settings of another server than the primary one
+					delete settings;
+					settings = new CFileSettingsReader(srv_fn);
+				}
+			}
+			else
+			{
+				settings_not_received = true;
 			}
 		}
 	}
@@ -597,6 +615,17 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 			sel->Add(m_serverChoice, 1, wxALL, 5);
 			GetSizer()->Insert(0, sel, 0, wxEXPAND);
 			m_serverChoice->Bind(wxEVT_CHOICE, &Settings::OnServerChoice, this);
+
+			if (settings_not_received)
+			{
+				wxStaticText* notice = new wxStaticText(this, wxID_ANY,
+					_("This server has not sent its settings to this client yet, so the values below may be "
+					"those of another server. They arrive when the client's settings are saved on the server "
+					"or the server restarts."));
+				notice->SetForegroundColour(wxColour(192, 0, 0));
+				notice->Wrap(wxDLG_UNIT(this, wxSize(330, -1)).GetWidth());
+				GetSizer()->Insert(1, notice, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 5);
+			}
 
 			if (selected_server != primary_server)
 			{
