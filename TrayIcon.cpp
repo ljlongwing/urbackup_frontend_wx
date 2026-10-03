@@ -17,6 +17,8 @@
 **************************************************************************/
 
 #include "TrayIcon.h"
+#include "ServerListUI.h"
+#include <algorithm>
 #include "main.h"
 #include "Connector.h"
 #include "Info.h"
@@ -55,6 +57,15 @@
 #define ID_TI_UNINSTALL 114
 #define ID_TI_CONFIG_COMPONENTS 115
 #define ID_TI_RESTORE_COMPONENTS 116
+//"Access/restore backups" of one of several servers: ID_TI_ACCESS_SERVER + index
+#define ID_TI_ACCESS_SERVER 200
+#define ID_TI_ACCESS_SERVER_MAX 299
+
+namespace
+{
+	//Servers in the "Access/restore backups" sub menu
+	std::vector<std::string> access_menu_servers;
+}
 
 extern MyTimer *timer;
 extern bool backup_is_running;
@@ -165,6 +176,17 @@ void TrayIcon::OnPopupClick(wxCommandEvent &evt)
 #ifdef __WXMAC__
     bring_to_foreground();
 #endif 
+	if (evt.GetId() >= ID_TI_ACCESS_SERVER
+		&& evt.GetId() <= ID_TI_ACCESS_SERVER_MAX)
+	{
+		size_t idx = static_cast<size_t>(evt.GetId() - ID_TI_ACCESS_SERVER);
+		if (idx < access_menu_servers.size())
+		{
+			accessBackups(wxString(), access_menu_servers[idx]);
+		}
+		return;
+	}
+
 	switch(evt.GetId())
 	{
 	case ID_TI_ADD_PATH:
@@ -329,7 +351,39 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 		{
 			msg = _("Access backups");
 		}
-		mnu->Append(ID_TI_ACCESS, msg, msg);
+		//With several servers that have a web interface: choose the server
+		access_menu_servers.clear();
+		wxMenu* server_menu = NULL;
+		SServerList server_list = Connector::getServerList();
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			if (!server_list.entries[i].ident.empty()
+				&& !server_list.entries[i].server_url.empty())
+			{
+				access_menu_servers.push_back(server_list.entries[i].ident);
+			}
+		}
+		if (access_menu_servers.size() > 1)
+		{
+			server_menu = new wxMenu();
+			for (size_t i = 0; i < server_list.entries.size(); ++i)
+			{
+				const SServerListEntry& e = server_list.entries[i];
+				std::vector<std::string>::iterator it = std::find(access_menu_servers.begin(), access_menu_servers.end(), e.ident);
+				if (e.ident.empty() || it == access_menu_servers.end())
+					continue;
+				int id = ID_TI_ACCESS_SERVER + static_cast<int>(it - access_menu_servers.begin());
+				if (id > ID_TI_ACCESS_SERVER_MAX)
+					break;
+				server_menu->Append(id, ServersPanel::displayName(e));
+			}
+			server_menu->Connect(wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&TrayIcon::OnPopupClick, NULL, this);
+			mnu->AppendSubMenu(server_menu, msg, msg);
+		}
+		else
+		{
+			mnu->Append(ID_TI_ACCESS, msg, msg);
+		}
 		mnu->AppendSeparator();
 	}
 	bool any_prev=false;
@@ -514,7 +568,7 @@ void read_tokens(wxString token_path, std::string& tokens)
 	}
 }
 
-void TrayIcon::accessBackups( wxString path )
+void TrayIcon::accessBackups( wxString path, const std::string& server )
 {
 	wxString orig_path = path;
 	if(!path.empty())
@@ -578,7 +632,7 @@ void TrayIcon::accessBackups( wxString path )
 		wxMessageBox( _("No rights to access any files."), wxT("UrBackup"), wxICON_ERROR);
 	}
 
-	std::string params = Connector::getAccessParameters(tokens);
+	std::string params = Connector::getAccessParameters(tokens, server);
 
 	if(!path.empty() && !params.empty())
 	{

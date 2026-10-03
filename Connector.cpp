@@ -636,6 +636,8 @@ SServerList Connector::getServerList()
 		e.internet_encrypt = values[p + "internet_encrypt"] != "false";
 		e.online = values[p + "online"] == "true";
 		e.internet_status = values[p + "internet_status"];
+		e.server_url = values[p + "server_url"];
+		e.last_backup = atoll(values[p + "last_backup"].c_str());
 		ret.entries.push_back(e);
 	}
 
@@ -816,9 +818,10 @@ SStatusDetails Connector::getStatusDetails(SConnection* connection)
 	
 }
 
-std::string Connector::getAccessParameters( const std::string& tokens )
+std::string Connector::getAccessParameters( const std::string& tokens, const std::string& server )
 {
-	return getResponse("GET ACCESS PARAMETERS","tokens="+tokens, false);
+	return getResponse("GET ACCESS PARAMETERS","tokens="+tokens
+		+ (server.empty() ? std::string() : "&server="+server), false);
 }
 
 int Connector::getCapabilities()

@@ -849,7 +849,42 @@ void MyTimer::Notify()
 		backup_is_running=false;
 	}
 
-	if(!status.lastbackupdate.Trim().empty() )
+	//With several servers: the last backup of each server (server list refreshed every minute)
+	static long server_list_time = 0;
+	static SServerList server_list;
+	if (server_list_time == 0
+		|| ct - server_list_time > 60)
+	{
+		server_list = Connector::getServerList();
+		server_list_time = ct;
+	}
+	size_t n_servers = 0;
+	for (size_t i = 0; i < server_list.entries.size(); ++i)
+	{
+		if (!server_list.entries[i].ident.empty())
+			++n_servers;
+	}
+
+	if (server_list.supported && n_servers > 1)
+	{
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			const SServerListEntry& e = server_list.entries[i];
+			if (e.ident.empty())
+				continue;
+			status_text += wxT("\n") + ServersPanel::displayName(e) + wxT(": ");
+			if (e.last_backup > 0)
+			{
+				wxDateTime lastbackup_dt((wxLongLong)(e.last_backup * 1000));
+				status_text += lastbackup_dt.Format(wxT("%x %H:%M"));
+			}
+			else
+			{
+				status_text += _("no backup yet");
+			}
+		}
+	}
+	else if(!status.lastbackupdate.Trim().empty() )
 	{
 		wxLongLong_t lastbackups;
 		if(status.lastbackupdate.ToLongLong(&lastbackups))
@@ -857,7 +892,7 @@ void MyTimer::Notify()
 			wxDateTime lastbackup_dt((wxLongLong)(lastbackups*1000));
 
 			status_text+=trans_1(_("Last backup on _1_"), lastbackup_dt.Format());
-		}	
+		}
 	}
 
 	if(status.pause && icon_type==ETrayIcon_PROGRESS)

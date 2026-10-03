@@ -205,7 +205,7 @@ struct SServerListEntry
 {
 	SServerListEntry()
 		: id(-1), local(true), internet(false), internet_compress(true),
-		internet_encrypt(true), online(false)
+		internet_encrypt(true), online(false), last_backup(0)
 	{}
 
 	int id;
@@ -224,6 +224,10 @@ struct SServerListEntry
 	//Has an active session (LAN or internet)
 	bool online;
 	std::string internet_status;
+	//Web interface of the server
+	std::string server_url;
+	//Last successful backup by this server (unix time, 0: none)
+	int64 last_backup;
 };
 
 struct SServerList
@@ -287,7 +291,8 @@ public:
 
 	static std::string getPasswordData(bool change_command, bool set_busy);
 
-	static std::string getAccessParameters(const std::string& tokens);
+	//server: open the web interface of this server (empty: the one in settings.cfg)
+	static std::string getAccessParameters(const std::string& tokens, const std::string& server = std::string());
 
 private:
 	static std::string getResponse(const std::string &cmd, const std::string &args, bool change_command, SConnection* connection=NULL, size_t timeoutms=5000, bool set_busy=true);
