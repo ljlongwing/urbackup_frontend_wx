@@ -20,6 +20,7 @@
 #include "stringtools.h"
 #include "escape.h"
 #include <iostream>
+#include <map>
 #include "json/json.h"
 #include <stdexcept>
 #include "TrayIcon.h"
@@ -587,6 +588,87 @@ int Connector::startImage(bool full)
 		return 0;
 	else
 		return 1;
+}
+
+SServerList Connector::getServerList()
+{
+	SServerList ret;
+	std::string d = getResponse("GET SERVER LIST", "", true);
+
+	std::map<std::string, std::string> values;
+	int numl = linecount(d);
+	for (int i = 0; i <= numl; ++i)
+	{
+		std::string l = getline(i, d);
+		size_t eq = l.find('=');
+		if (eq != std::string::npos)
+		{
+			std::string val = l.substr(eq + 1);
+			if (!val.empty() && val[val.size() - 1] == '\r')
+				val.erase(val.size() - 1);
+			values[l.substr(0, eq)] = val;
+		}
+	}
+
+	if (values.find("count") == values.end())
+	{
+		return ret;
+	}
+
+	ret.supported = true;
+	int count = atoi(values["count"].c_str());
+	for (int i = 0; i < count; ++i)
+	{
+		std::string p = nconvert(i) + ".";
+		SServerListEntry e;
+		e.id = atoi(values[p + "id"].c_str());
+		e.name = values[p + "name"];
+		e.ident = values[p + "ident"];
+		e.endpoint = values[p + "endpoint"];
+		e.fingerprint = values[p + "fingerprint"];
+		e.local = values[p + "local"] != "false";
+		e.internet = values[p + "internet"] == "true";
+		e.internet_server = values[p + "internet_server"];
+		e.internet_server_port = values[p + "internet_server_port"];
+		e.internet_server_proxy = values[p + "internet_server_proxy"];
+		e.internet_authkey = values[p + "internet_authkey"];
+		e.internet_compress = values[p + "internet_compress"] != "false";
+		e.internet_encrypt = values[p + "internet_encrypt"] != "false";
+		e.online = values[p + "online"] == "true";
+		e.internet_status = values[p + "internet_status"];
+		ret.entries.push_back(e);
+	}
+
+	int pending_count = atoi(values["pending_count"].c_str());
+	for (int i = 0; i < pending_count; ++i)
+	{
+		ret.pending.push_back(values["pending." + nconvert(i)]);
+	}
+
+	return ret;
+}
+
+bool Connector::setServerList(const std::vector<SServerListEntry>& entries)
+{
+	std::string data = "count=" + nconvert(entries.size()) + "\n";
+	for (size_t i = 0; i < entries.size(); ++i)
+	{
+		const SServerListEntry& e = entries[i];
+		std::string p = nconvert(i) + ".";
+		data += p + "id=" + nconvert(e.id) + "\n";
+		data += p + "name=" + e.name + "\n";
+		data += p + "local=" + std::string(e.local ? "true" : "false") + "\n";
+		data += p + "internet=" + std::string(e.internet ? "true" : "false") + "\n";
+		data += p + "internet_server=" + e.internet_server + "\n";
+		data += p + "internet_server_port=" + e.internet_server_port + "\n";
+		data += p + "internet_server_proxy=" + e.internet_server_proxy + "\n";
+		data += p + "internet_authkey=" + e.internet_authkey + "\n";
+		data += p + "internet_compress=" + std::string(e.internet_compress ? "true" : "false") + "\n";
+		data += p + "internet_encrypt=" + std::string(e.internet_encrypt ? "true" : "false") + "\n";
+	}
+
+	escapeClientMessage(data);
+	return getResponse("SET SERVER LIST " + data, "", true) == "OK";
 }
 
 bool Connector::updateSettings(const std::string &ndata, size_t timeoutms)

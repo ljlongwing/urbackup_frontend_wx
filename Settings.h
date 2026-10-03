@@ -21,6 +21,7 @@
 #include "Connector.h"
 #include "gui/GUI.h"
 #include "FileSettingsReader.h"
+#include "ServerListUI.h"
 
 namespace
 {
@@ -69,4 +70,7 @@ private:
 	CFileSettingsReader *settings;
 
 	bool init_complete;
+
+	//NULL if the backend has no server list (older backend)
+	ServersPanel* servers_panel;
 };

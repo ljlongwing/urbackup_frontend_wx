@@ -523,6 +523,31 @@ Settings::Settings(wxWindow* parent) : GUISettings(parent),
 #endif
 	m_textCtrl19->SetValidator(wxTextValidator(wxFILTER_DIGITS));
 	m_textCtrl15->SetValidator(getPathValidator());
+
+	servers_panel = NULL;
+	SServerList server_list = Connector::getServerList();
+	if (server_list.supported)
+	{
+		//Each server has its own connection settings in the server list. The internet
+		//tab keeps the backup settings that apply to internet backups
+		servers_panel = new ServersPanel(m_notebook, server_list);
+		int internet_page = m_notebook->FindPage(m_tab_internet);
+		m_notebook->InsertPage(internet_page >= 0 ? internet_page : m_notebook->GetPageCount(), servers_panel, _("Servers"));
+
+		wxWindow* connection_ctrls[] = { m_staticTextInternetEnabled, m_checkBoxInternetEnabled,
+			m_staticInternetServer, m_textCtrlInternetServer, m_staticInternetServerProxy, m_textCtrlInternetServerProxy,
+			m_staticInternetServerAuthkey, m_textCtrlInternetServerAuthkey,
+			m_staticTextInternetCompress, m_checkBoxInternetCompress, m_bitmapButtonInternetCompress,
+			m_staticTextInternetEncrypt, m_checkBoxInternetEncrypt, m_bitmapButtonInternetEncrypt };
+		for (size_t i = 0; i < sizeof(connection_ctrls) / sizeof(connection_ctrls[0]); ++i)
+		{
+			if (connection_ctrls[i] != NULL)
+				connection_ctrls[i]->Hide();
+		}
+		m_tab_internet->Layout();
+		Fit();
+	}
+
 	Show(true);
 	init_complete = true;
 }
@@ -786,11 +811,14 @@ void Settings::OnOkClick( wxCommandEvent& event )
 
 	std::string s_data;
 
-	s_data += std::string("internet_mode_enabled=")+nconvert(internet_mode_enabled)+"\n";
-	s_data += std::string("internet_server=")+ std::string(internet_server.ToUTF8()) + "\n";
-	s_data += std::string("internet_server_port=") + nconvert(l_internet_server_port) + "\n";
-	s_data += std::string("internet_server_proxy=") + std::string(internet_server_proxy.ToUTF8()) + "\n";
-	s_data += std::string("internet_authkey=") + std::string(internet_authkey.ToUTF8()) + "\n";
+	if (servers_panel == NULL)
+	{
+		s_data += std::string("internet_mode_enabled=")+nconvert(internet_mode_enabled)+"\n";
+		s_data += std::string("internet_server=")+ std::string(internet_server.ToUTF8()) + "\n";
+		s_data += std::string("internet_server_port=") + nconvert(l_internet_server_port) + "\n";
+		s_data += std::string("internet_server_proxy=") + std::string(internet_server_proxy.ToUTF8()) + "\n";
+		s_data += std::string("internet_authkey=") + std::string(internet_authkey.ToUTF8()) + "\n";
+	}
 	s_data += std::string("computername=") + std::string(computername.ToUTF8()) + "\n";
 
 	int64 ctime = wxGetUTCTimeMillis().GetValue() / 1000;
@@ -831,6 +859,15 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	}
 
 	Connector::updateSettings(s_data);
+
+	if (servers_panel != NULL
+		&& servers_panel->isModified())
+	{
+		if (!Connector::setServerList(servers_panel->getEntries()))
+		{
+			wxMessageBox(_("Saving the server list failed."), wxT("UrBackup"), wxOK | wxICON_ERROR);
+		}
+	}
 
 	/*std::map<std::string, std::string> n_vals;
 	n_vals["update_freq_incr"]=nconvert(static_cast<float>(l_update_freq_incr*60.f*60.f));

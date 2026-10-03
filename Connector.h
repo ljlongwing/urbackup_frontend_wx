@@ -200,9 +200,48 @@ struct SStartRestore
 	int64 process_id;
 };
 
+//A server of the backend's server list
+struct SServerListEntry
+{
+	SServerListEntry()
+		: id(-1), local(true), internet(false), internet_compress(true),
+		internet_encrypt(true), online(false)
+	{}
+
+	int id;
+	std::string name;
+	std::string ident;
+	std::string endpoint;
+	std::string fingerprint;
+	bool local;
+	bool internet;
+	std::string internet_server;
+	std::string internet_server_port;
+	std::string internet_server_proxy;
+	std::string internet_authkey;
+	bool internet_compress;
+	bool internet_encrypt;
+	//Has an active session (LAN or internet)
+	bool online;
+	std::string internet_status;
+};
+
+struct SServerList
+{
+	SServerList() : supported(false) {}
+
+	//False if the backend does not support a server list (older version)
+	bool supported;
+	std::vector<SServerListEntry> entries;
+	//Identities of servers that tried to connect but are not trusted
+	std::vector<std::string> pending;
+};
+
 class Connector
 {
 public:
+	static SServerList getServerList();
+	static bool setServerList(const std::vector<SServerListEntry>& entries);
 	static std::vector<SBackupDir> getSharedPaths(void);
 	static bool saveSharedPaths(const std::vector<SBackupDir> &res);
 	static int startBackup(bool full);
