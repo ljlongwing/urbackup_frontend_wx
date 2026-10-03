@@ -36,7 +36,8 @@ namespace
 class Settings : public GUISettings
 {
 public:
-	Settings(wxWindow* parent);
+	//server_ident: show/edit the backup settings of this server (empty: primary server)
+	Settings(wxWindow* parent, const std::string& server_ident = std::string(), bool access_pw_checked = false);
 	virtual ~Settings(void);
 
 	virtual void OnOkClick( wxCommandEvent& event );
@@ -73,4 +74,17 @@ private:
 
 	//NULL if the backend has no server list (older backend)
 	ServersPanel* servers_panel;
+
+	void OnServerChoice(wxCommandEvent& event);
+
+public:
+	//Set when the user selected another server (modal dialog ends with wxID_RETRY)
+	std::string switch_to_server;
+
+private:
+	//Server whose backup settings are shown (empty: no server list)
+	std::string selected_server;
+	std::string primary_server;
+	wxChoice* m_serverChoice;
+	std::vector<std::string> server_choice_idents;
 };

@@ -373,10 +373,20 @@ bool MyApp::OnInit()
 	}
 	else if(cmd==wxT("settings"))
 	{
-		Settings *s=new Settings(NULL);
-		SetTopWindow(s);
-		s->ShowModal();
-		s->Destroy();
+		std::string server;
+		bool access_pw_checked = false;
+		while (true)
+		{
+			Settings *s=new Settings(NULL, server, access_pw_checked);
+			SetTopWindow(s);
+			int rc = s->ShowModal();
+			server = s->switch_to_server;
+			s->Destroy();
+			//Another server was selected: show its settings
+			if (rc != wxID_RETRY || server.empty())
+				break;
+			access_pw_checked = true;
+		}
 		wxExit();
 	}
 	else if(cmd==wxT("paths"))

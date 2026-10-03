@@ -235,6 +235,8 @@ struct SServerList
 	std::vector<SServerListEntry> entries;
 	//Identities of servers that tried to connect but are not trusted
 	std::vector<std::string> pending;
+	//Identity of the server whose settings are in settings.cfg
+	std::string primary;
 };
 
 class Connector
@@ -246,7 +248,8 @@ public:
 	static bool saveSharedPaths(const std::vector<SBackupDir> &res);
 	static int startBackup(bool full);
 	static int startImage(bool full);
-	static bool updateSettings(const std::string &sdata, size_t timeoutms = 5000);
+	//server: change the settings of this server only (empty: all/primary)
+	static bool updateSettings(const std::string &sdata, size_t timeoutms = 5000, const std::string& server = std::string());
 	static std::vector<SLogEntry> getLogEntries(void);
 	static std::vector<SLogLine> getLogdata(int logid, int loglevel);
 	static bool setPause(bool b_pause);

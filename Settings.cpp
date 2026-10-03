@@ -150,20 +150,29 @@ wxTextValidator getDigitSlashValidator(void)
 	return val;
 }
 
-Settings::Settings(wxWindow* parent) : GUISettings(parent),
-	init_complete(false)
+namespace
+{
+	std::string settingsFilePath(const std::string& fn)
+	{
+#ifdef _DEBUG
+		return "urbackup/data/" + fn;
+#elif _WIN32
+		return g_res_path + "urbackup/data/" + fn;
+#else
+		return VARDIR "/urbackup/data/" + fn;
+#endif
+	}
+}
+
+Settings::Settings(wxWindow* parent, const std::string& server_ident, bool access_pw_checked) : GUISettings(parent),
+	init_complete(false), servers_panel(NULL), m_serverChoice(NULL)
 {
 	SetIcon(wxIcon(res_path+wxT("backup-ok.")+ico_ext, ico_type));
-#ifdef _DEBUG
-	settings=new CFileSettingsReader("urbackup/data/settings.cfg");
-#elif _WIN32
-	settings=new CFileSettingsReader(g_res_path+"urbackup/data/settings.cfg");
-#else
-	settings = new CFileSettingsReader(VARDIR "/urbackup/data/settings.cfg");
-#endif
+	settings=new CFileSettingsReader(settingsFilePath("settings.cfg"));
 
 	std::wstring client_settings_tray_access_pw;
-	if (getSettingsValue(L"client_settings_tray_access_pw", &client_settings_tray_access_pw, settings)
+	if (!access_pw_checked
+		&& getSettingsValue(L"client_settings_tray_access_pw", &client_settings_tray_access_pw, settings)
 		&& !client_settings_tray_access_pw.empty())
 	{
 		do
@@ -190,6 +199,25 @@ Settings::Settings(wxWindow* parent) : GUISettings(parent),
 
 			}
 		} while (true);
+	}
+
+	SServerList server_list = Connector::getServerList();
+	if (server_list.supported)
+	{
+		primary_server = server_list.primary;
+		selected_server = server_ident.empty() ? primary_server : server_ident;
+
+		if (!selected_server.empty()
+			&& selected_server != primary_server)
+		{
+			//Backup settings of another server than the primary one
+			std::string srv_fn = settingsFilePath("settings_srv_" + selected_server + ".cfg");
+			if (wxFileExists(wxString::FromUTF8(srv_fn.c_str())))
+			{
+				delete settings;
+				settings = new CFileSettingsReader(srv_fn);
+			}
+		}
 	}
 
 	std::wstring t;
@@ -524,8 +552,6 @@ Settings::Settings(wxWindow* parent) : GUISettings(parent),
 	m_textCtrl19->SetValidator(wxTextValidator(wxFILTER_DIGITS));
 	m_textCtrl15->SetValidator(getPathValidator());
 
-	servers_panel = NULL;
-	SServerList server_list = Connector::getServerList();
 	if (server_list.supported)
 	{
 		//Each server has its own connection settings in the server list. The internet
@@ -545,6 +571,41 @@ Settings::Settings(wxWindow* parent) : GUISettings(parent),
 				connection_ctrls[i]->Hide();
 		}
 		m_tab_internet->Layout();
+
+		//Backup settings (intervals, retention, directories, ...) are per server
+		std::vector<SServerListEntry> choice_entries;
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			if (!server_list.entries[i].ident.empty())
+				choice_entries.push_back(server_list.entries[i]);
+		}
+		if (choice_entries.size() > 1)
+		{
+			wxBoxSizer* sel = new wxBoxSizer(wxHORIZONTAL);
+			sel->Add(new wxStaticText(this, wxID_ANY, _("Backup settings of:")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+			m_serverChoice = new wxChoice(this, wxID_ANY);
+			for (size_t i = 0; i < choice_entries.size(); ++i)
+			{
+				wxString label = ServersPanel::displayName(choice_entries[i]);
+				if (choice_entries[i].ident == primary_server)
+					label += wxT(" ") + _("(primary)");
+				m_serverChoice->Append(label);
+				server_choice_idents.push_back(choice_entries[i].ident);
+				if (choice_entries[i].ident == selected_server)
+					m_serverChoice->SetSelection(static_cast<int>(i));
+			}
+			sel->Add(m_serverChoice, 1, wxALL, 5);
+			GetSizer()->Insert(0, sel, 0, wxEXPAND);
+			m_serverChoice->Bind(wxEVT_CHOICE, &Settings::OnServerChoice, this);
+
+			if (selected_server != primary_server)
+			{
+				//The computer name applies to all servers
+				m_textCtrl15->Disable();
+			}
+		}
+
+		Layout();
 		Fit();
 	}
 
@@ -819,7 +880,10 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		s_data += std::string("internet_server_proxy=") + std::string(internet_server_proxy.ToUTF8()) + "\n";
 		s_data += std::string("internet_authkey=") + std::string(internet_authkey.ToUTF8()) + "\n";
 	}
-	s_data += std::string("computername=") + std::string(computername.ToUTF8()) + "\n";
+	if (selected_server.empty() || selected_server == primary_server)
+	{
+		s_data += std::string("computername=") + std::string(computername.ToUTF8()) + "\n";
+	}
 
 	int64 ctime = wxGetUTCTimeMillis().GetValue() / 1000;
 
@@ -858,7 +922,7 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		}
 	}
 
-	Connector::updateSettings(s_data);
+	Connector::updateSettings(s_data, 5000, selected_server);
 
 	if (servers_panel != NULL
 		&& servers_panel->isModified())
@@ -929,6 +993,26 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	Connector::updateSettings(mergeNewSettings(settings, n_vals));*/
 
 	Close();
+}
+
+void Settings::OnServerChoice(wxCommandEvent& event)
+{
+	int sel = m_serverChoice->GetSelection();
+	if (sel < 0 || sel >= static_cast<int>(server_choice_idents.size())
+		|| server_choice_idents[sel] == selected_server)
+		return;
+
+	//Reopen the dialog with the settings of the selected server (unsaved changes are discarded)
+	switch_to_server = server_choice_idents[sel];
+	if (IsModal())
+	{
+		EndModal(wxID_RETRY);
+	}
+	else
+	{
+		new Settings(GetParent(), switch_to_server, true);
+		Destroy();
+	}
 }
 
 void Settings::OnAbortClick( wxCommandEvent& event )

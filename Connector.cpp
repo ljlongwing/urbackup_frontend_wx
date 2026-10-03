@@ -639,6 +639,8 @@ SServerList Connector::getServerList()
 		ret.entries.push_back(e);
 	}
 
+	ret.primary = values["primary"];
+
 	int pending_count = atoi(values["pending_count"].c_str());
 	for (int i = 0; i < pending_count; ++i)
 	{
@@ -671,11 +673,11 @@ bool Connector::setServerList(const std::vector<SServerListEntry>& entries)
 	return getResponse("SET SERVER LIST " + data, "", true) == "OK";
 }
 
-bool Connector::updateSettings(const std::string &ndata, size_t timeoutms)
+bool Connector::updateSettings(const std::string &ndata, size_t timeoutms, const std::string& server)
 {
 	std::string data=ndata;
 	escapeClientMessage(data);
-	std::string d=getResponse("UPDATE SETTINGS "+data,"", true, NULL, timeoutms);
+	std::string d=getResponse("UPDATE SETTINGS "+data, server.empty() ? std::string() : "server="+server, true, NULL, timeoutms);
 
 	if(d!="OK")
 		return false;
