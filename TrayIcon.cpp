@@ -525,23 +525,26 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 		mnu->Append(ID_TI_SETTINGS, _("Settings") );
 		any_prev=true;
 	}
-	if(!timer->hasCapability(DONT_ALLOW_CONFIG_PATHS))
+	//Backup paths, logs and components are opened from the settings window (one
+	//elevation for all of them). Without the settings window they stay in the menu
+	bool in_settings = !timer->hasCapability(DONT_SHOW_SETTINGS);
+	if(!in_settings && !timer->hasCapability(DONT_ALLOW_CONFIG_PATHS))
 	{
 		mnu->Append(ID_TI_ADD_PATH, _("Add/Remove backup paths"));
 		any_prev=true;
 	}
-	if(!timer->hasCapability(DONT_SHOW_LOGS))
+	if(!in_settings && !timer->hasCapability(DONT_SHOW_LOGS))
 	{
 		mnu->Append(ID_TI_LOGS, _("Logs") );
 		any_prev=true;
 	}
 #ifdef _WIN32
-	if (!timer->hasCapability(DONT_ALLOW_COMPONENT_CONFIG))
+	if (!in_settings && !timer->hasCapability(DONT_ALLOW_COMPONENT_CONFIG))
 	{
 		mnu->Append(ID_TI_CONFIG_COMPONENTS, _("Configure components to backup"));
 		any_prev = true;
 	}
-	if (!timer->hasCapability(DONT_ALLOW_COMPONENT_RESTORE)
+	if (!in_settings && !timer->hasCapability(DONT_ALLOW_COMPONENT_RESTORE)
 		&& !timer->hasCapability(STATUS_NO_COMPONENTS))
 	{
 		mnu->Append(ID_TI_RESTORE_COMPONENTS, _("Restore components"));

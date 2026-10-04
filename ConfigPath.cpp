@@ -203,6 +203,33 @@ ConfigPath::ConfigPath(wxWindow* parent)
 		}
 	}
 
+	if (servers_list != NULL)
+	{
+		//Default paths of the other servers
+		std::vector<SBackupDir*> shown;
+		for (size_t i = 0; i < dirs_group.size(); ++i) shown.push_back(&dirs_group[i]);
+		for (size_t i = 0; i < dirs_home.size(); ++i) shown.push_back(&dirs_home[i]);
+		for (size_t i = 0; i < dirs_client.size(); ++i) shown.push_back(&dirs_client[i]);
+		for (size_t i = 0; i < c_dirs.size(); ++i)
+		{
+			if (c_dirs[i].server_default == 0)
+				continue;
+			bool found = false;
+			for (size_t j = 0; j < shown.size(); ++j)
+			{
+				if (shown[j]->path == c_dirs[i].path)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				dirs_other.push_back(c_dirs[i]);
+			}
+		}
+	}
+
 	renderListBoxContent();
 	switchBitmapLabel();
 
@@ -272,6 +299,11 @@ void ConfigPath::OnClickNew(wxCommandEvent &evt)
 void ConfigPath::OnClickDel(wxCommandEvent &evt)
 {
 	int sel=listbox->GetSelection();
+	if (isOtherDir(sel))
+	{
+		wxMessageBox(_("This is a default path of another server. It can only be changed on that server."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_INFORMATION, this);
+		return;
+	}
 	if(sel>=0)
 	{
 		size_t offs_home = (default_dirs_use & c_use_group) ? dirs_group.size() : 0;
@@ -411,6 +443,16 @@ void ConfigPath::renderListBoxContent()
 			listbox->Append(dirs_client[i].path);
 		}
 	}
+
+	for (size_t i = 0; i < dirs_other.size(); ++i)
+	{
+		listbox->Append(dirs_other[i].path);
+	}
+}
+
+bool ConfigPath::isOtherDir(int sel)
+{
+	return sel >= 0 && static_cast<size_t>(sel) >= listbox->GetCount() - dirs_other.size();
 }
 
 SBackupDir & ConfigPath::getSel(int sel)
@@ -429,6 +471,11 @@ SBackupDir & ConfigPath::getSel(int sel)
 	}
 
 	offs_home += (default_dirs_use & c_use_value) ? dirs_home.size() : 0;
+
+	if (isOtherDir(sel))
+	{
+		return dirs_other[sel - (listbox->GetCount() - dirs_other.size())];
+	}
 
 	return dirs_client[sel - offs_home];
 }
@@ -460,7 +507,7 @@ void ConfigPath::OnPathSelected(wxCommandEvent &evt)
 	int sel=listbox->GetSelection();
 	if(sel>=0)
 	{
-		m_textCtrl18->Enable();
+		m_textCtrl18->Enable(!isOtherDir(sel));
 		m_textCtrl18->SetValue(getSel(sel).name);
 		renderServers();
 		/*m_group->Enable();

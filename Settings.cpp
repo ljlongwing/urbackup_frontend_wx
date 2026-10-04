@@ -21,6 +21,13 @@
 #include "main.h"
 #include "capa_bits.h"
 #include "TranslationHelper.h"
+#include "ConfigPath.h"
+#include "Logs.h"
+#ifdef _WIN32
+#include "SelectWindowsComponents.h"
+#include "SelectRestoreWindowsComponents.h"
+HRESULT initCom();
+#endif
 
 #include <wx/valtext.h>
 
@@ -638,8 +645,91 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 		Fit();
 	}
 
+	addWindowButtons();
+
 	Show(true);
 	init_complete = true;
+}
+
+void Settings::addWindowButtons()
+{
+	wxSizer* sizer = m_button1->GetContainingSizer();
+	if (sizer == NULL)
+		return;
+
+	size_t pos = 0;
+	if (!MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Backup paths..."));
+		btn->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(Settings::OnOpenPaths), NULL, this);
+		sizer->Insert(pos++, btn, 0, wxALIGN_BOTTOM | wxALL, 5);
+	}
+	if (!MyTimer::hasCapability(DONT_SHOW_LOGS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Logs..."));
+		btn->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(Settings::OnOpenLogs), NULL, this);
+		sizer->Insert(pos++, btn, 0, wxALIGN_BOTTOM | wxALL, 5);
+	}
+#ifdef _WIN32
+	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_CONFIG, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Components..."));
+		btn->SetToolTip(_("Configure components to backup"));
+		btn->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(Settings::OnOpenComponents), NULL, this);
+		sizer->Insert(pos++, btn, 0, wxALIGN_BOTTOM | wxALL, 5);
+	}
+	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_RESTORE, capa)
+		&& !MyTimer::hasCapability(STATUS_NO_COMPONENTS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Restore components..."));
+		btn->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(Settings::OnOpenRestoreComponents), NULL, this);
+		sizer->Insert(pos++, btn, 0, wxALIGN_BOTTOM | wxALL, 5);
+	}
+#endif
+	//Same height as Ok/Cancel
+	for (size_t i = 0; i < pos; ++i)
+	{
+		sizer->GetItem(i)->GetWindow()->SetMinSize(wxDLG_UNIT(this, wxSize(-1, 13)));
+	}
+	if (pos > 0)
+	{
+		Layout();
+		Fit();
+	}
+}
+
+void Settings::OnOpenPaths(wxCommandEvent& event)
+{
+	ConfigPath* cp = new ConfigPath(this);
+	cp->ShowModal();
+	cp->Destroy();
+}
+
+void Settings::OnOpenLogs(wxCommandEvent& event)
+{
+	Logs* l = new Logs(this);
+	l->ShowModal();
+	l->Destroy();
+}
+
+void Settings::OnOpenComponents(wxCommandEvent& event)
+{
+#ifdef _WIN32
+	initCom();
+	SelectWindowsComponents* cp = new SelectWindowsComponents(this);
+	cp->ShowModal();
+	cp->Destroy();
+#endif
+}
+
+void Settings::OnOpenRestoreComponents(wxCommandEvent& event)
+{
+#ifdef _WIN32
+	initCom();
+	SelectRestoreComponents* cp = new SelectRestoreComponents(this);
+	cp->ShowModal();
+	cp->Destroy();
+#endif
 }
 
 Settings::~Settings(void)

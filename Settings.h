@@ -46,7 +46,15 @@ public:
 	virtual void OnBitmapBtnClick(wxCommandEvent& event);
 	virtual void OnCtlChange(wxCommandEvent& event);
 
+	//The other configuration windows, opened from here so they share the
+	//(elevated) settings process
+	void OnOpenPaths(wxCommandEvent& event);
+	void OnOpenLogs(wxCommandEvent& event);
+	void OnOpenComponents(wxCommandEvent& event);
+	void OnOpenRestoreComponents(wxCommandEvent& event);
+
 private:
+	void addWindowButtons();
 
 	std::wstring transformValToUI(const std::wstring& key, const std::wstring& val);
 	std::wstring transformValFromUI(const std::wstring& key, const std::wstring& val);
