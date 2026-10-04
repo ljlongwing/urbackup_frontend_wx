@@ -60,11 +60,43 @@
 //"Access/restore backups" of one of several servers: ID_TI_ACCESS_SERVER + index
 #define ID_TI_ACCESS_SERVER 200
 #define ID_TI_ACCESS_SERVER_MAX 299
+//"Back up now" on one of several servers: ID_TI_BACKUP_SERVER + 4*index + backup type
+#define ID_TI_BACKUP_SERVER 300
+#define ID_TI_BACKUP_SERVER_MAX 399
 
 namespace
 {
 	//Servers in the "Access/restore backups" sub menu
 	std::vector<std::string> access_menu_servers;
+	//Servers in the "Back up now" sub menu
+	std::vector<std::string> backup_menu_servers;
+
+	enum EBackupNowType
+	{
+		BackupNowFullFile = 0,
+		BackupNowIncrFile = 1,
+		BackupNowFullImage = 2,
+		BackupNowIncrImage = 3
+	};
+
+	//Returns true if the backup was started
+	bool startBackupNow(int type, const std::string& server)
+	{
+		bool image = (type == BackupNowFullImage || type == BackupNowIncrImage);
+		bool full = (type == BackupNowFullFile || type == BackupNowFullImage);
+		int rc = image ? Connector::startImage(full, server) : Connector::startBackup(full, server);
+		if (rc == 1)
+			return true;
+		else if (rc == 2)
+			wxMessageBox(_("A backup is already running. Could not start another one."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_EXCLAMATION);
+		else if (rc == 3 && !server.empty())
+			wxMessageBox(_("Could not start backup, because this server is not connected."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
+		else if (rc == 3)
+			wxMessageBox(_("Could not start backup, because no backup server was found."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
+		else
+			wxMessageBox(_("Could not start backup."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
+		return false;
+	}
 }
 
 extern MyTimer *timer;
@@ -187,6 +219,19 @@ void TrayIcon::OnPopupClick(wxCommandEvent &evt)
 		return;
 	}
 
+	if (evt.GetId() >= ID_TI_BACKUP_SERVER
+		&& evt.GetId() <= ID_TI_BACKUP_SERVER_MAX)
+	{
+		size_t idx = static_cast<size_t>(evt.GetId() - ID_TI_BACKUP_SERVER) / 4;
+		int type = (evt.GetId() - ID_TI_BACKUP_SERVER) % 4;
+		if (idx < backup_menu_servers.size()
+			&& startBackupNow(type, backup_menu_servers[idx]))
+		{
+			SetIcon(getAppIcon(wxT("backup-progress")), _("Waiting for server..."));
+		}
+		return;
+	}
+
 	switch(evt.GetId())
 	{
 	case ID_TI_ADD_PATH:
@@ -196,18 +241,10 @@ void TrayIcon::OnPopupClick(wxCommandEvent &evt)
 	case ID_TI_BACKUP_FULL:
 	case ID_TI_BACKUP_INCR:
 		{
-			bool full= (evt.GetId()==ID_TI_BACKUP_FULL);
-			int rc=Connector::startBackup(full);
-			if(rc==1)
+			if (startBackupNow(evt.GetId() == ID_TI_BACKUP_FULL ? BackupNowFullFile : BackupNowIncrFile, std::string()))
 			{
 				SetIcon(getAppIcon(wxT("backup-progress")), _("Waiting for server..."));
 			}
-			else if(rc==2)
-				wxMessageBox( _("A backup is already running. Could not start another one."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_EXCLAMATION);
-			else if(rc==3)
-				wxMessageBox( _("Could not start backup, because no backup server was found."), wxT("UrBackup"),  wxOK | wxCENTRE | wxICON_ERROR);
-			else
-				wxMessageBox( _("Could not start backup."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 
 		}break;
 	case ID_TI_SETTINGS:
@@ -221,18 +258,10 @@ void TrayIcon::OnPopupClick(wxCommandEvent &evt)
 	case ID_TI_BACKUP_IMAGE_FULL:
 	case ID_TI_BACKUP_IMAGE_INCR:
 		{
-			bool full= (evt.GetId()==ID_TI_BACKUP_IMAGE_FULL);
-			int rc=Connector::startImage(full);
-			if(rc==1)
+			if (startBackupNow(evt.GetId() == ID_TI_BACKUP_IMAGE_FULL ? BackupNowFullImage : BackupNowIncrImage, std::string()))
 			{
 				SetIcon(getAppIcon(wxT("backup-progress")), _("Waiting for server..."));
 			}
-			else if(rc==2)
-				wxMessageBox( _("A backup is already running. Could not start another one."), wxT("UrBackup"), wxICON_EXCLAMATION);
-			else if(rc==3)
-				wxMessageBox( _("Could not start backup, because no backup server was found."), wxT("UrBackup"), wxICON_ERROR);
-			else
-				wxMessageBox( _("Could not start backup, because no backup server was found."), wxT("UrBackup"), wxICON_ERROR);
 		}break;
 	case ID_TI_PAUSE:
 		{
@@ -387,7 +416,78 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 		mnu->AppendSeparator();
 	}
 	bool any_prev=false;
+	//Allowed "Back up now" types
+	std::vector<int> backup_types;
+	std::vector<wxString> backup_type_names;
 	if(!timer->hasCapability(DONT_ALLOW_STARTING_FILE_BACKUPS))
+	{
+		if(!timer->hasCapability(DONT_ALLOW_STARTING_FULL_FILE_BACKUPS))
+		{
+			backup_types.push_back(BackupNowFullFile);
+			backup_type_names.push_back(_("Full file backup"));
+		}
+		if(!timer->hasCapability(DONT_ALLOW_STARTING_INCR_FILE_BACKUPS))
+		{
+			backup_types.push_back(BackupNowIncrFile);
+			backup_type_names.push_back(_("Incremental file backup"));
+		}
+	}
+#ifdef _WIN32
+	if(!timer->hasCapability(DONT_ALLOW_STARTING_IMAGE_BACKUPS) && !timer->hasCapability(DONT_DO_IMAGE_BACKUPS) )
+	{
+		if(!timer->hasCapability(DONT_ALLOW_STARTING_FULL_IMAGE_BACKUPS))
+		{
+			backup_types.push_back(BackupNowFullImage);
+			backup_type_names.push_back(_("Full image backup"));
+		}
+		if(!timer->hasCapability(DONT_ALLOW_STARTING_INCR_IMAGE_BACKUPS))
+		{
+			backup_types.push_back(BackupNowIncrImage);
+			backup_type_names.push_back(_("Incremental image backup"));
+		}
+	}
+#endif
+	//With several servers: "Back up now" > server > backup type, so the backup starts on the chosen server
+	backup_menu_servers.clear();
+	{
+		SServerList server_list = Connector::getServerList();
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			if (!server_list.entries[i].ident.empty()
+				&& ID_TI_BACKUP_SERVER + 4 * static_cast<int>(backup_menu_servers.size()) + 3 <= ID_TI_BACKUP_SERVER_MAX)
+			{
+				backup_menu_servers.push_back(server_list.entries[i].ident);
+			}
+		}
+		if (backup_menu_servers.size() > 1 && !backup_types.empty())
+		{
+			wxMenu* backup_menu = new wxMenu();
+			size_t idx = 0;
+			for (size_t i = 0; i < server_list.entries.size() && idx < backup_menu_servers.size(); ++i)
+			{
+				const SServerListEntry& e = server_list.entries[i];
+				if (e.ident != backup_menu_servers[idx])
+					continue;
+				wxMenu* server_menu = new wxMenu();
+				for (size_t j = 0; j < backup_types.size(); ++j)
+				{
+					server_menu->Append(ID_TI_BACKUP_SERVER + 4 * static_cast<int>(idx) + backup_types[j], backup_type_names[j]);
+				}
+				server_menu->Connect(wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&TrayIcon::OnPopupClick, NULL, this);
+				backup_menu->AppendSubMenu(server_menu, ServersPanel::displayName(e));
+				++idx;
+			}
+			backup_menu->Connect(wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&TrayIcon::OnPopupClick, NULL, this);
+			mnu->AppendSubMenu(backup_menu, _("Back up now"));
+			mnu->AppendSeparator();
+			backup_types.clear();
+		}
+		else
+		{
+			backup_menu_servers.clear();
+		}
+	}
+	if(!backup_types.empty() && !timer->hasCapability(DONT_ALLOW_STARTING_FILE_BACKUPS))
 	{
 		if(!timer->hasCapability(DONT_ALLOW_STARTING_FULL_FILE_BACKUPS))
 		{
@@ -401,7 +501,7 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 		}		
 	}
 #ifdef _WIN32
-	if(!timer->hasCapability(DONT_ALLOW_STARTING_IMAGE_BACKUPS) && !timer->hasCapability(DONT_DO_IMAGE_BACKUPS) )
+	if(!backup_types.empty() && !timer->hasCapability(DONT_ALLOW_STARTING_IMAGE_BACKUPS) && !timer->hasCapability(DONT_DO_IMAGE_BACKUPS) )
 	{
 		if(!timer->hasCapability(DONT_ALLOW_STARTING_FULL_IMAGE_BACKUPS))
 		{

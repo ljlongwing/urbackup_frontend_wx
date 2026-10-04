@@ -250,8 +250,9 @@ public:
 	static bool setServerList(const std::vector<SServerListEntry>& entries);
 	static std::vector<SBackupDir> getSharedPaths(void);
 	static bool saveSharedPaths(const std::vector<SBackupDir> &res);
-	static int startBackup(bool full);
-	static int startImage(bool full);
+	//server: start the backup on this server (empty: any)
+	static int startBackup(bool full, const std::string& server = std::string());
+	static int startImage(bool full, const std::string& server = std::string());
 	//server: change the settings of this server only (empty: all/primary)
 	static bool updateSettings(const std::string &sdata, size_t timeoutms = 5000, const std::string& server = std::string());
 	static std::vector<SLogEntry> getLogEntries(void);

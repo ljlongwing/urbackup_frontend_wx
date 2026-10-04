@@ -550,7 +550,7 @@ bool Connector::saveSharedPaths(const std::vector<SBackupDir> &res)
 		return true;
 }
 
-int Connector::startBackup(bool full)
+int Connector::startBackup(bool full, const std::string& server)
 {
 	std::string s;
 	if(full)
@@ -558,7 +558,7 @@ int Connector::startBackup(bool full)
 	else
 		s="START BACKUP INCR";
 
-	std::string d=getResponse(s,"", false);
+	std::string d=getResponse(s, server.empty() ? std::string() : "server="+EscapeParamString(server), false);
 
 	if(d=="RUNNING")
 		return 2;
@@ -570,7 +570,7 @@ int Connector::startBackup(bool full)
 		return 1;
 }
 
-int Connector::startImage(bool full)
+int Connector::startImage(bool full, const std::string& server)
 {
 	std::string s;
 	if(full)
@@ -578,7 +578,7 @@ int Connector::startImage(bool full)
 	else
 		s="START IMAGE INCR";
 
-	std::string d=getResponse(s,"", false);
+	std::string d=getResponse(s, server.empty() ? std::string() : "server="+EscapeParamString(server), false);
 
 	if(d=="RUNNING")
 		return 2;
@@ -593,7 +593,10 @@ int Connector::startImage(bool full)
 SServerList Connector::getServerList()
 {
 	SServerList ret;
-	std::string d = getResponse("GET SERVER LIST", "", true);
+	//The tray icon is not elevated and cannot read the administrator password.
+	//The server list works without it (just without the internet auth keys)
+	bool admin = !getPasswordData(true, false).empty();
+	std::string d = getResponse("GET SERVER LIST", "", admin);
 
 	std::map<std::string, std::string> values;
 	int numl = linecount(d);
@@ -679,7 +682,7 @@ bool Connector::updateSettings(const std::string &ndata, size_t timeoutms, const
 {
 	std::string data=ndata;
 	escapeClientMessage(data);
-	std::string d=getResponse("UPDATE SETTINGS "+data, server.empty() ? std::string() : "server="+server, true, NULL, timeoutms);
+	std::string d=getResponse("UPDATE SETTINGS "+data, server.empty() ? std::string() : "server="+EscapeParamString(server), true, NULL, timeoutms);
 
 	if(d!="OK")
 		return false;
@@ -821,7 +824,7 @@ SStatusDetails Connector::getStatusDetails(SConnection* connection)
 std::string Connector::getAccessParameters( const std::string& tokens, const std::string& server )
 {
 	return getResponse("GET ACCESS PARAMETERS","tokens="+tokens
-		+ (server.empty() ? std::string() : "&server="+server), false);
+		+ (server.empty() ? std::string() : "&server="+EscapeParamString(server)), false);
 }
 
 int Connector::getCapabilities()
