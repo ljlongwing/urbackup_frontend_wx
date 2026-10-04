@@ -36,6 +36,10 @@ struct SBackupDir
 	int group;
 	wxString flags;
 	int server_default;
+	//Identities of the servers this directory is backed up to (empty: all)
+	std::vector<std::string> servers;
+	//The servers were chosen on the client (not a server's default directory)
+	bool servers_from_client;
 };
 
 struct SStatus

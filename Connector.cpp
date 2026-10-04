@@ -505,6 +505,13 @@ std::vector<SBackupDir> Connector::getSharedPaths(void)
 				dir["server_default"].asInt()
 			};
 
+			Json::Value servers = dir.get("servers", Json::Value(Json::arrayValue));
+			for (Json::Value::ArrayIndex j = 0; j < servers.size(); ++j)
+			{
+				rdir.servers.push_back(servers[j].asString());
+			}
+			rdir.servers_from_client = dir.get("servers_from_client", false).asBool();
+
 			ret.push_back(rdir);
 		}
 	}
@@ -539,8 +546,21 @@ bool Connector::saveSharedPaths(const std::vector<SBackupDir> &res)
 		args+="dir_"+nconvert(idx)+"="+path;
 		args+="&dir_"+nconvert(idx)+"_name="+name;
 		args+="&dir_"+nconvert(idx)+"_group="+nconvert(res[i].group);
+		if (res[i].servers_from_client && !res[i].servers.empty())
+		{
+			std::string servers;
+			for (size_t j = 0; j < res[i].servers.size(); ++j)
+			{
+				if (!servers.empty()) servers += ",";
+				servers += res[i].servers[j];
+			}
+			args += "&dir_" + nconvert(idx) + "_servers=" + EscapeParamString(servers);
+		}
 		idx += 1;
 	}
+
+	//The servers of each directory are in dir_N_servers
+	args += std::string(args.empty() ? "" : "&") + "with_servers=1";
 
 	std::string d=getResponse("SAVE BACKUP DIRS", args, true);
 

@@ -36,6 +36,7 @@ public:
 	void OnNameTextChange(wxCommandEvent &evt);
 	void OnGroupChange( wxCommandEvent& evt );
 	void OnClickSourceSwitch(wxCommandEvent& event);
+	void OnServerToggled(wxCommandEvent& event);
 	
 
 private:
@@ -47,6 +48,12 @@ private:
 	void renderListBoxContent();
 
 	SBackupDir& getSel(int sel);
+	void renderServers();
+
+	//"Back up to": servers of the selected path, only with several servers
+	wxStaticText* servers_label;
+	wxCheckListBox* servers_list;
+	std::vector<std::string> server_idents;
 
 	std::wstring getDefaultDirname(const std::wstring &path);
 	bool findPathName(const std::wstring &pn);

@@ -20,6 +20,9 @@
 #include "stringtools.h"
 #include "FileSettingsReader.h"
 #include "Settings.h"
+#include "ServerListUI.h"
+#include <wx/checklst.h>
+#include <algorithm>
 
 #define CP_ID_OK 100
 
@@ -101,6 +104,34 @@ ConfigPath::ConfigPath(wxWindow* parent)
 
 	std::vector<SBackupDir> c_dirs = Connector::getSharedPaths();
 
+	//With several servers each path can be backed up to some of them only
+	servers_label = NULL;
+	servers_list = NULL;
+	{
+		SServerList server_list = Connector::getServerList();
+		wxArrayString server_names;
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			if (!server_list.entries[i].ident.empty())
+			{
+				server_idents.push_back(server_list.entries[i].ident);
+				server_names.Add(ServersPanel::displayName(server_list.entries[i]));
+			}
+		}
+		wxSizer* sizer = listbox->GetContainingSizer();
+		if (server_idents.size() > 1 && sizer != NULL)
+		{
+			servers_label = new wxStaticText(this, wxID_ANY, _("Back up this path to:"));
+			servers_list = new wxCheckListBox(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, server_names);
+			servers_list->Enable(false);
+			//After the list of paths and the name row
+			sizer->Insert(2, servers_label, 0, wxLEFT | wxRIGHT | wxTOP, 5);
+			sizer->Insert(3, servers_list, 0, wxEXPAND | wxALL, 5);
+			servers_list->Connect(wxEVT_COMMAND_CHECKLISTBOX_TOGGLED, wxCommandEventHandler(ConfigPath::OnServerToggled), NULL, this);
+			GetSizer()->Fit(this);
+		}
+	}
+
 	std::map<wxString, size_t > path_n;
 
 	for (size_t i = 0; i<default_dirs_toks.size(); ++i)
@@ -142,6 +173,17 @@ ConfigPath::ConfigPath(wxWindow* parent)
 		if (dir.name.IsEmpty())
 		{
 			dir.name = getDefaultDirname(dir.path.wc_str());
+		}
+
+		dir.servers_from_client = false;
+		for (size_t j = 0; j < c_dirs.size(); ++j)
+		{
+			if (c_dirs[j].path == dir.path)
+			{
+				dir.servers = c_dirs[j].servers;
+				dir.servers_from_client = c_dirs[j].servers_from_client;
+				break;
+			}
 		}
 
 		dir.server_default = 1;
@@ -212,6 +254,7 @@ void ConfigPath::OnClickNew(wxCommandEvent &evt)
 		ad.group=0;
 		ad.id=0;
 		ad.server_default = 0;
+		ad.servers_from_client = false;
 		dirs_client.push_back(ad);
 
 		if (dirs_group.empty() && dirs_home.empty())
@@ -419,9 +462,67 @@ void ConfigPath::OnPathSelected(wxCommandEvent &evt)
 	{
 		m_textCtrl18->Enable();
 		m_textCtrl18->SetValue(getSel(sel).name);
+		renderServers();
 		/*m_group->Enable();
 		m_group->Select(dirs[sel].group);*/
 	}
+}
+
+void ConfigPath::renderServers()
+{
+	if (servers_list == NULL)
+		return;
+
+	int sel = listbox->GetSelection();
+	if (sel < 0)
+	{
+		servers_list->Enable(false);
+		return;
+	}
+
+	SBackupDir& dir = getSel(sel);
+	for (size_t i = 0; i < server_idents.size(); ++i)
+	{
+		servers_list->Check(static_cast<unsigned int>(i), dir.servers.empty()
+			|| std::find(dir.servers.begin(), dir.servers.end(), server_idents[i]) != dir.servers.end());
+	}
+	//The servers of a server's default directory are configured on the servers
+	servers_list->Enable(dir.server_default == 0);
+}
+
+void ConfigPath::OnServerToggled(wxCommandEvent& event)
+{
+	int sel = listbox->GetSelection();
+	if (sel < 0 || servers_list == NULL)
+		return;
+
+	std::vector<std::string> servers;
+	for (size_t i = 0; i < server_idents.size(); ++i)
+	{
+		if (servers_list->IsChecked(static_cast<unsigned int>(i)))
+			servers.push_back(server_idents[i]);
+	}
+
+	if (servers.empty())
+	{
+		wxMessageBox(_("Each path has to be backed up to at least one server."), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_EXCLAMATION, this);
+		renderServers();
+		return;
+	}
+
+	SBackupDir& dir = getSel(sel);
+	if (servers.size() == server_idents.size())
+	{
+		//All servers, including servers added later
+		dir.servers.clear();
+		dir.servers_from_client = false;
+	}
+	else
+	{
+		dir.servers = servers;
+		dir.servers_from_client = true;
+	}
+	mod = true;
 }
 
 void ConfigPath::OnNameTextChange(wxCommandEvent &evt)
