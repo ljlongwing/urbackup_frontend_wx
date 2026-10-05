@@ -44,6 +44,11 @@ public:
 	virtual ~Settings(void);
 
 	virtual void OnOkClick( wxCommandEvent& event );
+	//Saves the changed settings. False (with a message) if a value is not valid
+	bool save();
+	//per_server: the pages (notebook) are shown in another window
+	wxNotebook* takePages(wxWindow* new_parent);
+	bool settingsNotReceived() const { return not_received; }
 	virtual void OnAbortClick( wxCommandEvent& event );
 	virtual void OnDisableImageBackups( wxCommandEvent& event );
 	virtual void OnBitmapBtnClick(wxCommandEvent& event);
@@ -70,6 +75,7 @@ private:
 	void applyGroupedLayout();
 
 	bool per_server;
+	bool not_received;
 
 	std::wstring transformValToUI(const std::wstring& key, const std::wstring& val);
 	std::wstring transformValFromUI(const std::wstring& key, const std::wstring& val);

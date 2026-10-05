@@ -20,6 +20,7 @@
 #include <wx/wx.h>
 #include <wx/listctrl.h>
 #include "Connector.h"
+#include <map>
 
 //Edits one server of the server list. "Local (LAN)" and "Internet" gate what the
 //client does with the server; the internet fields are only enabled with "Internet"
@@ -83,18 +84,24 @@ private:
 	wxButton* m_trust;
 };
 
-//Settings window of the client: computer name, the servers (with their backup
-//settings) and the other configuration windows
+//Settings window of the client: computer name, the servers (a click on one shows
+//its backup settings below) and the other configuration windows
+class Settings;
+class wxNotebook;
 class ClientSettingsDialog : public wxDialog
 {
 public:
 	ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa);
+	~ClientSettingsDialog();
 
 private:
 	void fillServers();
+	void highlightSelected();
+	void selectServer(int idx);
+	void editServer(int idx);
+	void removeServer(int idx);
 	void OnAdd(wxCommandEvent& event);
 	void OnTrust(wxCommandEvent& event);
-	void OnServerButton(wxCommandEvent& event);
 	void OnOk(wxCommandEvent& event);
 	void OnCancel(wxCommandEvent& event);
 
@@ -104,8 +111,20 @@ private:
 	bool modified;
 	int capa;
 	wxString computername_orig;
+	int selected;
 
 	wxTextCtrl* m_computername;
-	wxPanel* m_servers;
+	wxPanel* m_rows;
 	wxButton* m_trust;
+	wxStaticText* m_settings_heading;
+	wxStaticText* m_notice;
+	wxPanel* m_pages;
+
+	std::vector<wxPanel*> row_panels;
+	std::vector<std::vector<wxWindow*> > row_texts;
+
+	//Backup settings of the servers that were selected (hidden dialogs, their pages are in m_pages)
+	std::map<std::string, Settings*> server_settings;
+	std::map<std::string, wxNotebook*> server_pages;
+	wxNotebook* current_pages;
 };

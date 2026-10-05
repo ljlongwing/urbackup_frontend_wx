@@ -216,7 +216,7 @@ wxString Settings::currentComputerName()
 }
 
 Settings::Settings(wxWindow* parent, const std::string& server_ident, bool access_pw_checked, bool p_per_server) : GUISettings(parent),
-	init_complete(false), servers_panel(NULL), m_serverChoice(NULL), per_server(p_per_server)
+	init_complete(false), servers_panel(NULL), m_serverChoice(NULL), per_server(p_per_server), not_received(false)
 {
 	SetIcon(wxIcon(res_path+wxT("backup-ok.")+ico_ext, ico_type));
 	settings=new CFileSettingsReader(settingsFilePath("settings.cfg"));
@@ -610,16 +610,8 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 			SetTitle(wxString::Format(_("Backup settings of %s"), ServersPanel::displayName(*entry)));
 		}
 
-		if (settings_not_received)
-		{
-			wxStaticText* notice = new wxStaticText(this, wxID_ANY,
-				_("This server has not sent its settings to this client yet, so the values below may be "
-				"those of another server. They arrive when the client's settings are saved on the server "
-				"or the server restarts."));
-			notice->SetForegroundColour(wxColour(192, 0, 0));
-			notice->Wrap(wxDLG_UNIT(this, wxSize(330, -1)).GetWidth());
-			GetSizer()->Insert(0, notice, 0, wxEXPAND | wxALL, 5);
-		}
+		//The client settings window shows the notice and the pages of this dialog
+		not_received = settings_not_received;
 
 		applyGroupedLayout();
 
@@ -706,9 +698,9 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 	if (!per_server)
 	{
 		addWindowButtons();
+		Show(true);
 	}
 
-	Show(true);
 	init_complete = true;
 }
 
@@ -961,7 +953,7 @@ Settings::~Settings(void)
 	delete settings;
 }
 
-void Settings::OnOkClick( wxCommandEvent& event )
+bool Settings::save()
 {
 	wxString update_freq_incr=m_textCtrl1->GetValue();
 	wxString update_freq_full=m_textCtrl2->GetValue();
@@ -1061,14 +1053,14 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	{
 		wxMessageBox( _("The incremental backup interval is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl1->SetFocus();
-		return;
+		return false;
 	}
 	if(!update_freq_full.ToLong(&l_update_freq_full)
 		&& settings_info[L"update_freq_full"].use==c_use_value_client)
 	{
 		wxMessageBox( _("The full backup interval  is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl2->SetFocus();
-		return;
+		return false;
 	}
 #ifdef _WIN32
 	if(!MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
@@ -1079,14 +1071,14 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		{
 			wxMessageBox( _("The full image backup interval  is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl22->SetFocus();
-			return;
+			return false;
 		}
 		if(!update_freq_image_incr.ToLong(&l_update_freq_image_incr) && m_checkBox1->GetValue()
 			&& settings_info[L"update_freq_image_incr"].use == c_use_value_client)
 		{
 			wxMessageBox( _("The incremental image backup time is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl21->SetFocus();
-			return;
+			return false;
 		}
 	}
 #endif
@@ -1095,28 +1087,28 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	{
 		wxMessageBox( _("The maximal number of incremental file backups  is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl131->SetFocus();
-		return;
+		return false;
 	}
 	if(!min_file_incr.ToLong(&l_min_file_incr)
 		&& settings_info[L"min_file_incr"].use == c_use_value_client)
 	{
 		wxMessageBox( _("The minimal number of incremental file backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl13->SetFocus();
-		return;
+		return false;
 	}
 	if(!max_file_full.ToLong(&l_max_file_full)
 		&& settings_info[L"max_file_full"].use == c_use_value_client)
 	{
 		wxMessageBox( _("The maximal number of full file backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl133->SetFocus();
-		return;
+		return false;
 	}
 	if(!min_file_full.ToLong(&l_min_file_full)
 		&& settings_info[L"min_file_full"].use == c_use_value_client)
 	{
 		wxMessageBox( _("Minimal number of full file backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl132->SetFocus();
-		return;
+		return false;
 	}
 #ifdef _WIN32
 	if(!MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
@@ -1126,28 +1118,28 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		{
 			wxMessageBox( _("Minimal number of incremental image backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl134->SetFocus();
-			return;
+			return false;
 		}
 		if(!max_image_incr.ToLong(&l_max_image_incr)
 			&& settings_info[L"max_image_incr"].use == c_use_value_client)
 		{
 			wxMessageBox( _("Maximal number of incremental image backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl135->SetFocus();
-			return;
+			return false;
 		}
 		if(!min_image_full.ToLong(&l_min_image_full)
 			&& settings_info[L"min_image_full"].use == c_use_value_client)
 		{
 			wxMessageBox( _("Minimal number of full image backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl136->SetFocus();
-			return;
+			return false;
 		}
 		if(!max_image_full.ToLong(&l_max_image_full)
 			&& settings_info[L"max_image_full"].use == c_use_value_client)
 		{
 			wxMessageBox( _("Maximal number of full image backups is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 			m_textCtrl137->SetFocus();
-			return;
+			return false;
 		}
 	}
 #endif
@@ -1156,7 +1148,7 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	{
 		wxMessageBox( _("Backup delay after system start is not a number"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrl19->SetFocus();
-		return;
+		return false;
 	}
 #ifdef _WIN32
 	if(!MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
@@ -1177,7 +1169,7 @@ void Settings::OnOkClick( wxCommandEvent& event )
 				{
 					wxMessageBox( trans_1(_("_1_ is not a volume"), ConvertToUnicode(img_paths[i])), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 					m_textCtrl23->SetFocus();
-					return;
+					return false;
 				}
 				else if(hVolume!=INVALID_HANDLE_VALUE)
 				{
@@ -1191,7 +1183,7 @@ void Settings::OnOkClick( wxCommandEvent& event )
 	{
 		wxMessageBox( _("The server port is not valid"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR);
 		m_textCtrlInternetServer->SetFocus();
-		return;
+		return false;
 	}
 
 	internet_speed.ToLong(&l_internet_speed);
@@ -1266,7 +1258,10 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		}
 	}
 
-	Connector::updateSettings(s_data, 5000, selected_server);
+	if (!s_data.empty())
+	{
+		Connector::updateSettings(s_data, 5000, selected_server);
+	}
 
 	if (servers_panel != NULL
 		&& servers_panel->isModified())
@@ -1336,7 +1331,15 @@ void Settings::OnOkClick( wxCommandEvent& event )
 
 	Connector::updateSettings(mergeNewSettings(settings, n_vals));*/
 
-	Close();
+	return true;
+}
+
+void Settings::OnOkClick( wxCommandEvent& event )
+{
+	if (save())
+	{
+		Close();
+	}
 }
 
 void Settings::OnServerChoice(wxCommandEvent& event)
@@ -1567,4 +1570,10 @@ void Settings::setSettingsSwitch(const std::wstring & key, wxBitmapButton* btn, 
 		if (!settings->getValue(key + L"_def", &setting.value_client))
 			settings->getValue(key, &setting.value_client);
 	}
+}
+
+wxNotebook* Settings::takePages(wxWindow* new_parent)
+{
+	m_notebook->Reparent(new_parent);
+	return m_notebook;
 }

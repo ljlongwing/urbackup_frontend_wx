@@ -21,6 +21,9 @@
 #include "main.h"
 #include "capa_bits.h"
 #include <wx/datetime.h>
+#include <wx/graphics.h>
+#include <wx/notebook.h>
+#include <algorithm>
 
 wxTextValidator getPathValidator(void);
 
@@ -447,20 +450,6 @@ void ServersPanel::OnTrust(wxCommandEvent& event)
 
 namespace
 {
-	enum
-	{
-		//Buttons of a server row: ID_SERVER_BUTTON + 3*index + action
-		ID_SERVER_BUTTON = wxID_HIGHEST + 100,
-		SERVER_ACTION_SETTINGS = 0,
-		SERVER_ACTION_EDIT = 1,
-		SERVER_ACTION_REMOVE = 2
-	};
-
-	wxString displayName(const SServerListEntry& entry)
-	{
-		return ServersPanel::displayName(entry);
-	}
-
 	wxString lastBackupText(const SServerListEntry& entry)
 	{
 		if (entry.last_backup <= 0)
@@ -476,11 +465,82 @@ namespace
 		ret->SetFont(font);
 		return ret;
 	}
+
+	enum EIcon
+	{
+		IconEdit,
+		IconRemove
+	};
+
+	//Small pencil/trash can icons, drawn so no image files are needed
+	wxBitmap drawIcon(EIcon icon, int size, const wxColour& col)
+	{
+		wxImage img(size, size);
+		img.InitAlpha();
+		unsigned char* alpha = img.GetAlpha();
+		for (int i = 0; i < size * size; ++i)
+			alpha[i] = 0;
+
+		wxGraphicsContext* gc = wxGraphicsContext::Create(img);
+		if (gc == NULL)
+			return wxBitmap(img);
+
+		gc->Scale(size / 16.0, size / 16.0);
+		gc->SetBrush(wxBrush(col));
+		gc->SetPen(wxPen(col, 1));
+
+		if (icon == IconEdit)
+		{
+			//Pencil from top right to bottom left
+			wxGraphicsPath body = gc->CreatePath();
+			body.MoveToPoint(11, 1.5);
+			body.AddLineToPoint(14.5, 5);
+			body.AddLineToPoint(6, 13.5);
+			body.AddLineToPoint(2.5, 10);
+			body.CloseSubpath();
+			gc->FillPath(body);
+			wxGraphicsPath tip = gc->CreatePath();
+			tip.MoveToPoint(2.5, 10);
+			tip.AddLineToPoint(6, 13.5);
+			tip.AddLineToPoint(1.5, 14.5);
+			tip.CloseSubpath();
+			gc->FillPath(tip);
+		}
+		else
+		{
+			//Trash can: handle, lid, bin with ribs
+			gc->SetBrush(*wxTRANSPARENT_BRUSH);
+			gc->SetPen(wxPen(col, 1.5));
+			gc->StrokeLine(6.5, 1.5, 9.5, 1.5);
+			gc->SetBrush(wxBrush(col));
+			gc->SetPen(wxPen(col, 1));
+			gc->DrawRectangle(2.5, 3, 11, 1.5);
+			wxGraphicsPath bin = gc->CreatePath();
+			bin.MoveToPoint(4, 5.5);
+			bin.AddLineToPoint(12, 5.5);
+			bin.AddLineToPoint(11, 15);
+			bin.AddLineToPoint(5, 15);
+			bin.CloseSubpath();
+			gc->SetBrush(*wxTRANSPARENT_BRUSH);
+			gc->SetPen(wxPen(col, 1.5));
+			gc->StrokePath(bin);
+			gc->StrokeLine(6.5, 7.5, 6.5, 13);
+			gc->StrokeLine(9.5, 7.5, 9.5, 13);
+		}
+		delete gc;
+		return wxBitmap(img);
+	}
+
+	enum
+	{
+		COL_COUNT = 6
+	};
 }
 
 ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)
 	: wxDialog(parent, wxID_ANY, _("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
-	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa)
+	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa),
+	selected(-1), current_pages(NULL)
 {
 	wxBoxSizer* top = new wxBoxSizer(wxVERTICAL);
 
@@ -502,8 +562,19 @@ ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& 
 	servers_header->Add(add, 0, wxALL, 5);
 	top->Add(servers_header, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
 
-	m_servers = new wxPanel(this, wxID_ANY);
-	top->Add(m_servers, 1, wxEXPAND | wxLEFT | wxRIGHT, 10);
+	//The servers. A click on a row shows its backup settings below
+	m_rows = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_THEME);
+	m_rows->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+	top->Add(m_rows, 0, wxEXPAND | wxLEFT | wxRIGHT, 10);
+
+	m_settings_heading = boldText(this, wxEmptyString);
+	top->Add(m_settings_heading, 0, wxLEFT | wxRIGHT | wxTOP, 10);
+	m_notice = new wxStaticText(this, wxID_ANY, wxEmptyString);
+	m_notice->SetForegroundColour(wxColour(192, 0, 0));
+	top->Add(m_notice, 0, wxLEFT | wxRIGHT | wxTOP, 10);
+	m_pages = new wxPanel(this, wxID_ANY);
+	m_pages->SetSizer(new wxBoxSizer(wxVERTICAL));
+	top->Add(m_pages, 1, wxEXPAND | wxLEFT | wxRIGHT, 5);
 
 	//The other configuration windows (opened in this process, so without another elevation)
 	wxBoxSizer* bottom = new wxBoxSizer(wxHORIZONTAL);
@@ -546,111 +617,242 @@ ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& 
 
 	add->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnAdd, this);
 	m_trust->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnTrust, this);
-	m_servers->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnServerButton, this);
 	ok->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnOk, this);
 	cancel->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnCancel, this);
+	Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) { wxCommandEvent evt; OnCancel(evt); });
 
+	//Start with the primary server's settings
+	int sel = entries.empty() ? -1 : 0;
+	for (size_t i = 0; i < entries.size(); ++i)
+	{
+		if (!primary.empty() && entries[i].ident == primary)
+			sel = static_cast<int>(i);
+	}
 	fillServers();
+	selectServer(sel);
 	Centre();
+}
+
+ClientSettingsDialog::~ClientSettingsDialog()
+{
+	//Their pages are in this window: delete them while the pages still exist
+	for (std::map<std::string, Settings*>::iterator it = server_settings.begin(); it != server_settings.end(); ++it)
+	{
+		delete it->second;
+	}
+	server_settings.clear();
 }
 
 void ClientSettingsDialog::fillServers()
 {
-	m_servers->DestroyChildren();
+	m_rows->DestroyChildren();
+	row_panels.clear();
+	row_texts.clear();
 
-	wxFlexGridSizer* grid = new wxFlexGridSizer(7, wxDLG_UNIT(this, wxSize(6, 2)));
-	grid->Add(boldText(m_servers, _("Name")));
-	grid->Add(boldText(m_servers, _("Identity")));
-	grid->Add(boldText(m_servers, _("Local")));
-	grid->Add(boldText(m_servers, _("Internet")));
-	grid->Add(boldText(m_servers, _("Status")));
-	grid->Add(boldText(m_servers, _("Last backup")));
-	grid->Add(new wxStaticText(m_servers, wxID_ANY, wxEmptyString));
+	wxBoxSizer* rows = new wxBoxSizer(wxVERTICAL);
+	wxColour icon_col = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
+	int icon_size = wxDLG_UNIT(m_rows, wxSize(0, 8)).GetHeight();
+	wxBitmap edit_icon = drawIcon(IconEdit, icon_size, icon_col);
+	wxBitmap remove_icon = drawIcon(IconRemove, icon_size, icon_col);
+
+	//Header and rows; the columns are aligned below
+	std::vector<std::vector<wxWindow*> > cells;
+	std::vector<wxBoxSizer*> row_sizers;
+	{
+		wxPanel* header = new wxPanel(m_rows, wxID_ANY);
+		wxBoxSizer* hs = new wxBoxSizer(wxHORIZONTAL);
+		std::vector<wxWindow*> c;
+		const wxString titles[COL_COUNT] = { _("Name"), _("Identity"), _("Local"), _("Internet"), _("Status"), _("Last backup") };
+		for (int i = 0; i < COL_COUNT; ++i)
+		{
+			c.push_back(boldText(header, titles[i]));
+			hs->Add(c.back(), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		}
+		header->SetSizer(hs);
+		rows->Add(header, 0, wxEXPAND);
+		cells.push_back(c);
+		row_sizers.push_back(hs);
+	}
 
 	for (size_t i = 0; i < entries.size(); ++i)
 	{
 		const SServerListEntry& e = entries[i];
-		wxString name = displayName(e);
+		wxPanel* row = new wxPanel(m_rows, wxID_ANY);
+		wxBoxSizer* rs = new wxBoxSizer(wxHORIZONTAL);
+		wxString name = ServersPanel::displayName(e);
 		if (!primary.empty() && e.ident == primary && entries.size() > 1)
 			name += wxT(" ") + _("(primary)");
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, name), 0, wxALIGN_CENTER_VERTICAL);
-		wxStaticText* fp = new wxStaticText(m_servers, wxID_ANY, fingerprintText(e));
+		std::vector<wxWindow*> c;
+		c.push_back(new wxStaticText(row, wxID_ANY, name));
+		c.push_back(new wxStaticText(row, wxID_ANY, fingerprintText(e)));
 		if (!e.fingerprint.empty())
-			fp->SetToolTip(wxString::FromUTF8(e.fingerprint.c_str()));
-		grid->Add(fp, 0, wxALIGN_CENTER_VERTICAL);
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.local ? wxString::FromUTF8("\xE2\x9C\x93") : wxString()), 0, wxALIGN_CENTER);
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.internet ? wxString::FromUTF8("\xE2\x9C\x93") : wxString()), 0, wxALIGN_CENTER);
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, statusText(e)), 0, wxALIGN_CENTER_VERTICAL);
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.ident.empty() ? wxString(wxT("-")) : lastBackupText(e)), 0, wxALIGN_CENTER_VERTICAL);
+			c.back()->SetToolTip(wxString::FromUTF8(e.fingerprint.c_str()));
+		c.push_back(new wxStaticText(row, wxID_ANY, e.local ? wxString::FromUTF8("\xE2\x9C\x93") : wxString(), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE));
+		c.push_back(new wxStaticText(row, wxID_ANY, e.internet ? wxString::FromUTF8("\xE2\x9C\x93") : wxString(), wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE));
+		c.push_back(new wxStaticText(row, wxID_ANY, statusText(e)));
+		c.push_back(new wxStaticText(row, wxID_ANY, e.ident.empty() ? wxString(wxT("-")) : lastBackupText(e)));
+		for (int j = 0; j < COL_COUNT; ++j)
+		{
+			rs->Add(c[j], 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+		}
 
-		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
-		int base = ID_SERVER_BUTTON + 3 * static_cast<int>(i);
-		wxButton* settings = new wxButton(m_servers, base + SERVER_ACTION_SETTINGS, _("Backup settings..."));
-		//Backup settings exist once the server has connected (and is saved in the list)
-		settings->Enable(!e.ident.empty());
-		buttons->Add(settings, 0, wxRIGHT, 3);
-		buttons->Add(new wxButton(m_servers, base + SERVER_ACTION_EDIT, _("Edit...")), 0, wxRIGHT, 3);
-		buttons->Add(new wxButton(m_servers, base + SERVER_ACTION_REMOVE, _("Remove")), 0);
-		grid->Add(buttons, 0, wxALIGN_CENTER_VERTICAL);
+		wxBitmapButton* edit = new wxBitmapButton(row, wxID_ANY, edit_icon);
+		edit->SetToolTip(_("Edit server"));
+		wxBitmapButton* remove = new wxBitmapButton(row, wxID_ANY, remove_icon);
+		remove->SetToolTip(_("Remove server"));
+		rs->Add(edit, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxTOP | wxBOTTOM, 3);
+		rs->Add(remove, 0, wxALIGN_CENTER_VERTICAL | wxALL, 3);
+		row->SetSizer(rs);
+		rows->Add(row, 0, wxEXPAND);
+
+		int idx = static_cast<int>(i);
+		edit->Bind(wxEVT_BUTTON, [this, idx](wxCommandEvent&) { editServer(idx); });
+		remove->Bind(wxEVT_BUTTON, [this, idx](wxCommandEvent&) { removeServer(idx); });
+		//Click anywhere in the row to select it
+		row->Bind(wxEVT_LEFT_DOWN, [this, idx](wxMouseEvent&) { selectServer(idx); });
+		for (int j = 0; j < COL_COUNT; ++j)
+		{
+			c[j]->Bind(wxEVT_LEFT_DOWN, [this, idx](wxMouseEvent&) { selectServer(idx); });
+		}
+
+		row_panels.push_back(row);
+		row_texts.push_back(c);
+		cells.push_back(c);
+		row_sizers.push_back(rs);
 	}
 
 	if (entries.empty())
 	{
-		grid->Add(new wxStaticText(m_servers, wxID_ANY, _("No servers yet. Add one, or wait for a server in the local network to find this computer.")));
+		rows->Add(new wxStaticText(m_rows, wxID_ANY, _("No servers yet. Add one, or wait for a server in the local network to find this computer.")), 0, wxALL, 5);
 	}
 
-	m_servers->SetSizer(grid, true);
+	//Same width for the cells of a column
+	for (int j = 0; j < COL_COUNT; ++j)
+	{
+		int width = 0;
+		for (size_t i = 0; i < cells.size(); ++i)
+			width = (std::max)(width, cells[i][j]->GetBestSize().GetWidth());
+		for (size_t i = 0; i < cells.size(); ++i)
+			cells[i][j]->SetMinSize(wxSize(width, -1));
+	}
 
+	m_rows->SetSizer(rows, true);
 	m_trust->Show(!pending.empty());
 
-	m_servers->Layout();
+	if (selected >= static_cast<int>(entries.size()))
+		selected = entries.empty() ? -1 : 0;
+	highlightSelected();
+
+	m_rows->Layout();
 	GetSizer()->Layout();
 	GetSizer()->Fit(this);
 }
 
-void ClientSettingsDialog::OnServerButton(wxCommandEvent& event)
+void ClientSettingsDialog::highlightSelected()
 {
-	int id = event.GetId() - ID_SERVER_BUTTON;
-	if (id < 0)
+	for (size_t i = 0; i < row_panels.size(); ++i)
 	{
-		event.Skip();
-		return;
+		bool sel = static_cast<int>(i) == selected;
+		wxColour bg = wxSystemSettings::GetColour(sel ? wxSYS_COLOUR_HIGHLIGHT : wxSYS_COLOUR_WINDOW);
+		wxColour fg = wxSystemSettings::GetColour(sel ? wxSYS_COLOUR_HIGHLIGHTTEXT : wxSYS_COLOUR_WINDOWTEXT);
+		row_panels[i]->SetBackgroundColour(bg);
+		for (size_t j = 0; j < row_texts[i].size(); ++j)
+		{
+			row_texts[i][j]->SetBackgroundColour(bg);
+			row_texts[i][j]->SetForegroundColour(fg);
+		}
+		row_panels[i]->Refresh();
 	}
-	size_t idx = static_cast<size_t>(id / 3);
-	int action = id % 3;
-	if (idx >= entries.size())
+}
+
+void ClientSettingsDialog::selectServer(int idx)
+{
+	selected = idx;
+	highlightSelected();
+
+	if (current_pages != NULL)
 	{
-		event.Skip();
-		return;
+		current_pages->Hide();
+		current_pages = NULL;
 	}
 
-	if (action == SERVER_ACTION_SETTINGS)
+	m_notice->SetLabel(wxEmptyString);
+	m_notice->Hide();
+
+	if (idx < 0 || idx >= static_cast<int>(entries.size()))
 	{
-		Settings* s = new Settings(this, entries[idx].ident, true, true);
-		s->ShowModal();
-		s->Destroy();
+		m_settings_heading->SetLabel(wxEmptyString);
 	}
-	else if (action == SERVER_ACTION_EDIT)
+	else if (entries[idx].ident.empty())
 	{
-		ServerEditDialog dlg(this, entries[idx]);
-		if (dlg.ShowModal() == wxID_OK)
+		m_settings_heading->SetLabel(wxString::Format(_("Backup settings of %s"), ServersPanel::displayName(entries[idx])));
+		m_notice->SetLabel(_("The backup settings are available once the server has connected to this client."));
+		m_notice->Show();
+	}
+	else
+	{
+		const std::string& ident = entries[idx].ident;
+		m_settings_heading->SetLabel(wxString::Format(_("Backup settings of %s"), ServersPanel::displayName(entries[idx])));
+
+		std::map<std::string, Settings*>::iterator it = server_settings.find(ident);
+		Settings* s;
+		if (it == server_settings.end())
 		{
-			entries[idx] = dlg.getEntry();
-			modified = true;
-			fillServers();
+			//The settings dialog of the server stays hidden, its pages are shown here
+			s = new Settings(NULL, ident, true, true);
+			server_settings[ident] = s;
+			wxNotebook* pages = s->takePages(m_pages);
+			m_pages->GetSizer()->Add(pages, 1, wxEXPAND | wxALL, 5);
+			server_pages[ident] = pages;
 		}
+		else
+		{
+			s = it->second;
+		}
+
+		if (s->settingsNotReceived())
+		{
+			m_notice->SetLabel(_("This server has not sent its settings to this client yet, so the values below may be "
+				"those of another server. They arrive when the client's settings are saved on the server "
+				"or the server restarts."));
+			m_notice->Wrap(wxDLG_UNIT(this, wxSize(330, -1)).GetWidth());
+			m_notice->Show();
+		}
+
+		current_pages = server_pages[ident];
+		current_pages->Show();
 	}
-	else if (action == SERVER_ACTION_REMOVE)
+
+	m_pages->Layout();
+	GetSizer()->Layout();
+	GetSizer()->Fit(this);
+}
+
+void ClientSettingsDialog::editServer(int idx)
+{
+	if (idx < 0 || idx >= static_cast<int>(entries.size()))
+		return;
+	ServerEditDialog dlg(this, entries[idx]);
+	if (dlg.ShowModal() == wxID_OK)
 	{
-		wxString msg = wxString::Format(_("Remove server \"%s\"? The client will no longer trust it, "
-			"so it cannot back up this computer anymore until it is added again."), displayName(entries[idx]));
-		if (wxMessageBox(msg, _("Remove server"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
-			return;
-		entries.erase(entries.begin() + idx);
+		entries[idx] = dlg.getEntry();
 		modified = true;
-		//The buttons are destroyed by fillServers, which is called from their event handler
-		CallAfter(&ClientSettingsDialog::fillServers);
+		CallAfter([this, idx]() { fillServers(); selectServer(idx); });
 	}
+}
+
+void ClientSettingsDialog::removeServer(int idx)
+{
+	if (idx < 0 || idx >= static_cast<int>(entries.size()))
+		return;
+	wxString msg = wxString::Format(_("Remove server \"%s\"? The client will no longer trust it, "
+		"so it cannot back up this computer anymore until it is added again."), ServersPanel::displayName(entries[idx]));
+	if (wxMessageBox(msg, _("Remove server"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
+		return;
+	entries.erase(entries.begin() + idx);
+	modified = true;
+	//The row (and the clicked button) is destroyed by fillServers
+	CallAfter([this]() { fillServers(); selectServer(entries.empty() ? -1 : 0); });
 }
 
 void ClientSettingsDialog::OnAdd(wxCommandEvent& event)
@@ -665,6 +867,7 @@ void ClientSettingsDialog::OnAdd(wxCommandEvent& event)
 		entries.push_back(dlg.getEntry());
 		modified = true;
 		fillServers();
+		selectServer(static_cast<int>(entries.size()) - 1);
 	}
 }
 
@@ -712,11 +915,25 @@ void ClientSettingsDialog::OnTrust(wxCommandEvent& event)
 		}
 		pending = server_list.pending;
 	}
-	CallAfter(&ClientSettingsDialog::fillServers);
+	CallAfter([this]() { fillServers(); selectServer(selected); });
 }
 
 void ClientSettingsDialog::OnOk(wxCommandEvent& event)
 {
+	//Backup settings of the servers that were shown (and are still in the list)
+	for (size_t i = 0; i < entries.size(); ++i)
+	{
+		std::map<std::string, Settings*>::iterator it = server_settings.find(entries[i].ident);
+		if (entries[i].ident.empty() || it == server_settings.end())
+			continue;
+		if (!it->second->save())
+		{
+			//Show the server with the value that is not valid
+			selectServer(static_cast<int>(i));
+			return;
+		}
+	}
+
 	if (!m_computername->GetValue().empty()
 		&& m_computername->GetValue() != computername_orig)
 	{
