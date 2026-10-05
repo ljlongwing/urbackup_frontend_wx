@@ -661,6 +661,8 @@ SServerList Connector::getServerList()
 		e.internet_status = values[p + "internet_status"];
 		e.server_url = values[p + "server_url"];
 		e.last_backup = atoll(values[p + "last_backup"].c_str());
+		if (!values[p + "capa"].empty())
+			e.capa = atoi(values[p + "capa"].c_str());
 		ret.entries.push_back(e);
 	}
 

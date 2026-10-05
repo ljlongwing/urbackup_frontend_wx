@@ -79,6 +79,42 @@ namespace
 		BackupNowIncrImage = 3
 	};
 
+	//"Back up now" types a server allows and does (capa: its capabilities)
+	std::vector<int> allowedBackupTypes(int capa)
+	{
+		std::vector<int> ret;
+		if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_FILE_BACKUPS, capa)
+			&& !MyTimer::hasCapability(DONT_DO_FILE_BACKUPS, capa))
+		{
+			if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_FULL_FILE_BACKUPS, capa))
+				ret.push_back(BackupNowFullFile);
+			if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_INCR_FILE_BACKUPS, capa))
+				ret.push_back(BackupNowIncrFile);
+		}
+#ifdef _WIN32
+		if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_IMAGE_BACKUPS, capa)
+			&& !MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
+		{
+			if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_FULL_IMAGE_BACKUPS, capa))
+				ret.push_back(BackupNowFullImage);
+			if (!MyTimer::hasCapability(DONT_ALLOW_STARTING_INCR_IMAGE_BACKUPS, capa))
+				ret.push_back(BackupNowIncrImage);
+		}
+#endif
+		return ret;
+	}
+
+	wxString backupTypeName(int type)
+	{
+		switch (type)
+		{
+		case BackupNowFullFile: return _("Full file backup");
+		case BackupNowIncrFile: return _("Incremental file backup");
+		case BackupNowFullImage: return _("Full image backup");
+		default: return _("Incremental image backup");
+		}
+	}
+
 	//Returns true if the backup was started
 	bool startBackupNow(int type, const std::string& server)
 	{
@@ -459,7 +495,7 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 				backup_menu_servers.push_back(server_list.entries[i].ident);
 			}
 		}
-		if (backup_menu_servers.size() > 1 && !backup_types.empty())
+		if (backup_menu_servers.size() > 1)
 		{
 			wxMenu* backup_menu = new wxMenu();
 			size_t idx = 0;
@@ -469,9 +505,15 @@ wxMenu* TrayIcon::CreatePopupMenu(void)
 				if (e.ident != backup_menu_servers[idx])
 					continue;
 				wxMenu* server_menu = new wxMenu();
-				for (size_t j = 0; j < backup_types.size(); ++j)
+				//What this server allows (the capabilities of the last connected server otherwise)
+				std::vector<int> server_types = allowedBackupTypes(e.capa >= 0 ? e.capa : timer->getCapa());
+				for (size_t j = 0; j < server_types.size(); ++j)
 				{
-					server_menu->Append(ID_TI_BACKUP_SERVER + 4 * static_cast<int>(idx) + backup_types[j], backup_type_names[j]);
+					server_menu->Append(ID_TI_BACKUP_SERVER + 4 * static_cast<int>(idx) + server_types[j], backupTypeName(server_types[j]));
+				}
+				if (server_types.empty())
+				{
+					server_menu->Append(wxID_ANY, _("This server does not allow starting backups"))->Enable(false);
 				}
 				server_menu->Connect(wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&TrayIcon::OnPopupClick, NULL, this);
 				backup_menu->AppendSubMenu(server_menu, ServersPanel::displayName(e));

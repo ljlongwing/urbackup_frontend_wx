@@ -209,7 +209,7 @@ struct SServerListEntry
 {
 	SServerListEntry()
 		: id(-1), local(true), internet(false), internet_compress(true),
-		internet_encrypt(true), online(false), last_backup(0)
+		internet_encrypt(true), online(false), last_backup(0), capa(-1)
 	{}
 
 	int id;
@@ -232,6 +232,8 @@ struct SServerListEntry
 	std::string server_url;
 	//Last successful backup by this server (unix time, 0: none)
 	int64 last_backup;
+	//Capabilities the server sent (capa_bits.h), -1: not connected
+	int capa;
 };
 
 struct SServerList

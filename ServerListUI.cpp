@@ -1047,7 +1047,10 @@ void ClientSettingsDialog::selectServer(int idx)
 		if (it == server_settings.end())
 		{
 			//The settings dialog of the server stays hidden, its pages are shown here
+			int server_capa = entries[idx].capa >= 0 ? entries[idx].capa : capa;
+			GUISettings::capa_override = server_capa;
 			s = new Settings(NULL, ident, true, true);
+			GUISettings::capa_override = -1;
 			server_settings[ident] = s;
 			wxNotebook* pages = s->takePages(m_pages);
 			m_pages->GetSizer()->Add(pages, 1, wxEXPAND | wxALL, 5);
@@ -1068,7 +1071,7 @@ void ClientSettingsDialog::selectServer(int idx)
 				paths.server_names[entries[i].ident] = ServersPanel::displayName(entries[i]);
 			}
 			ServerPathsPage* paths_page = new ServerPathsPage(pages, &paths, ident,
-				MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, capa));
+				MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, server_capa));
 			size_t pos = 0;
 			while (pos < pages->GetPageCount()
 				&& (pages->GetPageText(pos) == _("File backups") || pages->GetPageText(pos) == _("Image backups")))
@@ -1077,17 +1080,52 @@ void ClientSettingsDialog::selectServer(int idx)
 			}
 			pages->InsertPage(pos, paths_page, _("Paths"));
 			paths_pages[ident] = paths_page;
+
+			//The server does not do file backups: its file backup settings and paths do not matter
+			if (MyTimer::hasCapability(DONT_DO_FILE_BACKUPS, server_capa))
+			{
+				for (size_t i = pages->GetPageCount(); i-- > 0;)
+				{
+					if (pages->GetPageText(i) == _("File backups") || pages->GetPageText(i) == _("Paths"))
+					{
+						pages->GetPage(i)->Hide();
+						pages->RemovePage(i);
+					}
+				}
+			}
 		}
 		else
 		{
 			s = it->second;
 		}
 
+		wxString notice;
 		if (s->settingsNotReceived())
 		{
-			m_notice->SetLabel(_("This server has not sent its settings to this client yet, so the values below may be "
+			notice = _("This server has not sent its settings to this client yet, so the values below may be "
 				"those of another server. They arrive when the client's settings are saved on the server "
-				"or the server restarts."));
+				"or the server restarts.");
+		}
+		//What the server is configured for (sent when it connects)
+		int server_capa = entries[idx].capa;
+		if (server_capa >= 0)
+		{
+			if (MyTimer::hasCapability(DONT_DO_FILE_BACKUPS, server_capa))
+			{
+				if (!notice.empty()) notice += wxT("\n");
+				notice += _("This server does not do file backups (set on the server).");
+			}
+			if (MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, server_capa))
+			{
+				if (!notice.empty()) notice += wxT("\n");
+				notice += entries[idx].internet && !entries[idx].local
+					? _("This server does not do image backups via internet (set on the server).")
+					: _("This server does not do image backups (set on the server).");
+			}
+		}
+		if (!notice.empty())
+		{
+			m_notice->SetLabel(notice);
 			m_notice->Wrap(wxDLG_UNIT(this, wxSize(330, -1)).GetWidth());
 			m_notice->Show();
 		}

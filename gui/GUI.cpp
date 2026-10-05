@@ -83,6 +83,8 @@ wxSize findDlgUnitY(wxWindow* parent, wxSize orig)
 
 ///////////////////////////////////////////////////////////////////////////
 
+int GUISettings::capa_override = -1;
+
 GUISettings::GUISettings( wxWindow* parent, wxWindowID id, const wxString& title, const wxPoint& pos, const wxSize& size, long style ) : wxDialog( parent, id, title, pos, size, style )
 {
 	this->SetSizeHints( wxSize( -1,-1 ), wxDefaultSize );
@@ -104,7 +106,7 @@ GUISettings::GUISettings( wxWindow* parent, wxWindowID id, const wxString& title
 	wxBoxSizer* bSizer_client=new wxBoxSizer( wxVERTICAL );
 	wxBoxSizer* bSizer_internet=new wxBoxSizer( wxVERTICAL );
 
-	capa = timer?timer->getCapa():Connector::getCapabilities();
+	capa = capa_override >= 0 ? capa_override : (timer?timer->getCapa():Connector::getCapabilities());
 
 #ifdef _WIN32
 	if( !MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa) )

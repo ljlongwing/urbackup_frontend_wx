@@ -5,6 +5,7 @@ const int DONT_ALLOW_STARTING_IMAGE_BACKUPS=8;
 const int DONT_ALLOW_CONFIG_PATHS=16;
 const int DONT_SHOW_LOGS=32;
 const int DONT_DO_IMAGE_BACKUPS=64;
+const int DONT_DO_FULL_FILE_BACKUPS=128;
 const int DONT_ALLOW_STARTING_FULL_IMAGE_BACKUPS=1<<8;
 const int DONT_ALLOW_STARTING_INCR_FILE_BACKUPS=1<<9;
 const int DONT_ALLOW_STARTING_FULL_FILE_BACKUPS=1<<10;
@@ -14,4 +15,7 @@ const int DONT_ALLOW_FILE_RESTORE = 1 << 13;
 const int DONT_ALLOW_COMPONENT_RESTORE = 1 << 14;
 const int DONT_ALLOW_COMPONENT_CONFIG = 1 << 15;
 const int STATUS_NO_COMPONENTS = 1 << 16;
-const int DONT_ALLOW_STARTING_INCR_IMAGE_BACKUPS = 1 << 17;
+const int DONT_ALLOW_STARTING_INCR_IMAGE_BACKUPS = 1 << 17;//The server sends its settings when the client asks for them on the channel ("SEND SETTINGS")
+const int SERVER_SEND_SETTINGS = 1 << 18;
+//The server does not do file backups (its "Do not do file backups" setting)
+const int DONT_DO_FILE_BACKUPS = 1 << 19;
