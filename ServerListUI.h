@@ -84,6 +84,51 @@ private:
 	wxButton* m_trust;
 };
 
+//The backup paths of the client, shared by the "Paths" pages of the servers
+struct SPathsModel
+{
+	SPathsModel() : modified(false) {}
+
+	std::vector<SBackupDir> dirs;
+	//Identity -> display name of the servers
+	std::map<std::string, wxString> server_names;
+	std::vector<std::string> server_idents;
+	bool modified;
+
+	bool isBackedUpTo(const SBackupDir& dir, const std::string& ident) const;
+};
+
+//"Paths" page of a server: the paths backed up to this server
+class ServerPathsPage : public wxPanel
+{
+public:
+	ServerPathsPage(wxWindow* parent, SPathsModel* model, const std::string& ident, bool read_only);
+
+	//The paths may have been changed on the page of another server
+	void refresh();
+
+private:
+	void OnAdd(wxCommandEvent& event);
+	void OnRemove(wxCommandEvent& event);
+	void OnSelect(wxListEvent& event);
+	void OnName(wxCommandEvent& event);
+	void updateButtons();
+	int selectedDir();
+	wxString uniqueName(const wxString& path);
+
+	SPathsModel* model;
+	std::string ident;
+	bool read_only;
+	bool updating;
+	//Index into model->dirs of each list item
+	std::vector<size_t> shown;
+
+	wxListCtrl* m_list;
+	wxTextCtrl* m_name;
+	wxButton* m_add;
+	wxButton* m_remove;
+};
+
 //Settings window of the client: computer name, the servers (a click on one shows
 //its backup settings below) and the other configuration windows
 class Settings;
@@ -126,5 +171,9 @@ private:
 	//Backup settings of the servers that were selected (hidden dialogs, their pages are in m_pages)
 	std::map<std::string, Settings*> server_settings;
 	std::map<std::string, wxNotebook*> server_pages;
+	std::map<std::string, ServerPathsPage*> paths_pages;
 	wxNotebook* current_pages;
+
+	SPathsModel paths;
+	bool paths_loaded;
 };

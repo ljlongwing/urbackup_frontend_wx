@@ -537,10 +537,261 @@ namespace
 	};
 }
 
+bool SPathsModel::isBackedUpTo(const SBackupDir& dir, const std::string& ident) const
+{
+	//No servers: all servers
+	return dir.servers.empty()
+		|| std::find(dir.servers.begin(), dir.servers.end(), ident) != dir.servers.end();
+}
+
+namespace
+{
+	enum
+	{
+		PCOL_PATH = 0,
+		PCOL_NAME,
+		PCOL_ALSO,
+		PCOL_SOURCE
+	};
+}
+
+ServerPathsPage::ServerPathsPage(wxWindow* parent, SPathsModel* model, const std::string& ident, bool read_only)
+	: wxPanel(parent, wxID_ANY), model(model), ident(ident), read_only(read_only), updating(false)
+{
+	wxBoxSizer* top = new wxBoxSizer(wxVERTICAL);
+
+	m_list = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDLG_UNIT(this, wxSize(330, 110)),
+		wxLC_REPORT | wxLC_SINGLE_SEL);
+	m_list->InsertColumn(PCOL_PATH, _("Path"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(this, wxSize(130, -1)).GetWidth());
+	m_list->InsertColumn(PCOL_NAME, _("Name"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(this, wxSize(55, -1)).GetWidth());
+	m_list->InsertColumn(PCOL_ALSO, _("Also backed up to"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(this, wxSize(80, -1)).GetWidth());
+	m_list->InsertColumn(PCOL_SOURCE, _("Added"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(this, wxSize(60, -1)).GetWidth());
+	top->Add(m_list, 1, wxEXPAND | wxALL, 5);
+
+	wxBoxSizer* bottom = new wxBoxSizer(wxHORIZONTAL);
+	m_add = new wxButton(this, wxID_ANY, _("+ Add path"));
+	m_remove = new wxButton(this, wxID_ANY, _("Remove"));
+	m_remove->SetToolTip(_("Stop backing up the path to this server. Other servers keep backing it up."));
+	bottom->Add(m_add, 0, wxRIGHT, 5);
+	bottom->Add(m_remove, 0, wxRIGHT, 15);
+	bottom->Add(new wxStaticText(this, wxID_ANY, _("Name:")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+	m_name = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDLG_UNIT(this, wxSize(100, -1)));
+	m_name->SetValidator(getPathValidator());
+	bottom->Add(m_name, 0, wxALIGN_CENTER_VERTICAL);
+	top->Add(bottom, 0, wxALL, 5);
+
+	SetSizer(top);
+
+	m_add->Bind(wxEVT_BUTTON, &ServerPathsPage::OnAdd, this);
+	m_remove->Bind(wxEVT_BUTTON, &ServerPathsPage::OnRemove, this);
+	m_list->Bind(wxEVT_LIST_ITEM_SELECTED, &ServerPathsPage::OnSelect, this);
+	m_list->Bind(wxEVT_LIST_ITEM_DESELECTED, &ServerPathsPage::OnSelect, this);
+	m_name->Bind(wxEVT_TEXT, &ServerPathsPage::OnName, this);
+
+	refresh();
+}
+
+void ServerPathsPage::refresh()
+{
+	updating = true;
+	int sel = selectedDir();
+	m_list->DeleteAllItems();
+	shown.clear();
+	for (size_t i = 0; i < model->dirs.size(); ++i)
+	{
+		const SBackupDir& dir = model->dirs[i];
+		if (!model->isBackedUpTo(dir, ident))
+			continue;
+
+		wxString also;
+		if (dir.servers.empty())
+		{
+			also = model->server_idents.size() > 1 ? _("all servers") : wxString(wxT("-"));
+		}
+		else
+		{
+			for (size_t j = 0; j < dir.servers.size(); ++j)
+			{
+				if (dir.servers[j] == ident)
+					continue;
+				std::map<std::string, wxString>::const_iterator it = model->server_names.find(dir.servers[j]);
+				if (!also.empty()) also += wxT(", ");
+				also += it != model->server_names.end() ? it->second : wxString::FromUTF8(dir.servers[j].c_str());
+			}
+			if (also.empty())
+				also = wxT("-");
+		}
+
+		long item = m_list->InsertItem(m_list->GetItemCount(), dir.path);
+		m_list->SetItem(item, PCOL_NAME, dir.name);
+		m_list->SetItem(item, PCOL_ALSO, also);
+		m_list->SetItem(item, PCOL_SOURCE, dir.server_default ? _("by a server") : _("on this computer"));
+		if (static_cast<int>(i) == sel)
+			m_list->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+		shown.push_back(i);
+	}
+	updating = false;
+	updateButtons();
+}
+
+int ServerPathsPage::selectedDir()
+{
+	long item = m_list->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+	if (item < 0 || item >= static_cast<long>(shown.size()))
+		return -1;
+	return static_cast<int>(shown[item]);
+}
+
+void ServerPathsPage::updateButtons()
+{
+	updating = true;
+	int sel = selectedDir();
+	//Default paths of a server are changed on the server
+	bool editable = !read_only && sel >= 0 && model->dirs[sel].server_default == 0;
+	m_remove->Enable(editable);
+	m_name->Enable(editable);
+	m_name->ChangeValue(sel >= 0 ? model->dirs[sel].name : wxString());
+	m_add->Enable(!read_only);
+	updating = false;
+}
+
+void ServerPathsPage::OnSelect(wxListEvent& event)
+{
+	if (!updating)
+		updateButtons();
+}
+
+void ServerPathsPage::OnName(wxCommandEvent& event)
+{
+	int sel = selectedDir();
+	if (updating || sel < 0 || model->dirs[sel].server_default != 0)
+		return;
+	model->dirs[sel].name = m_name->GetValue();
+	model->modified = true;
+	long item = m_list->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+	if (item >= 0)
+		m_list->SetItem(item, PCOL_NAME, model->dirs[sel].name);
+}
+
+wxString ServerPathsPage::uniqueName(const wxString& path)
+{
+	wxString base = path;
+	while (!base.empty() && (base.Last() == '/' || base.Last() == '\\'))
+		base.RemoveLast();
+	base = base.AfterLast('/').AfterLast('\\');
+	wxString clean;
+	for (size_t i = 0; i < base.size(); ++i)
+	{
+		wxChar ch = base[i];
+		if (ch != '*' && ch != ':' && ch != '/' && ch != '\\' && ch != ' ' && ch != '?'
+			&& ch != '"' && ch != '<' && ch != '>' && ch != '|')
+			clean += ch;
+	}
+	if (clean.empty())
+		clean = wxT("root");
+
+	wxString name = clean;
+	for (int k = 0; k < 100; ++k)
+	{
+		bool used = false;
+		for (size_t i = 0; i < model->dirs.size(); ++i)
+		{
+			if (model->dirs[i].name.CmpNoCase(name) == 0)
+				used = true;
+		}
+		if (!used)
+			return name;
+		name = clean + wxString::Format(wxT("_%d"), k);
+	}
+	return name;
+}
+
+void ServerPathsPage::OnAdd(wxCommandEvent& event)
+{
+	wxDirDialog dlg(this, _("Please select the directory that will be backed up."), wxEmptyString, wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+
+	wxString path = dlg.GetPath();
+	for (size_t i = 0; i < model->dirs.size(); ++i)
+	{
+		SBackupDir& dir = model->dirs[i];
+		if (dir.path != path)
+			continue;
+		if (model->isBackedUpTo(dir, ident))
+		{
+			wxMessageBox(_("This path is already backed up to this server."), wxT("UrBackup"), wxOK | wxICON_INFORMATION, this);
+			return;
+		}
+		if (dir.server_default != 0)
+		{
+			wxMessageBox(_("This is a default path of another server. It can only be changed on that server."), wxT("UrBackup"), wxOK | wxICON_INFORMATION, this);
+			return;
+		}
+		//Already backed up to other servers: back it up to this one too
+		dir.servers.push_back(ident);
+		dir.servers_from_client = true;
+		model->modified = true;
+		refresh();
+		return;
+	}
+
+	SBackupDir dir;
+	dir.path = path;
+	dir.name = uniqueName(path);
+	dir.id = 0;
+	dir.group = 0;
+	dir.server_default = 0;
+	//Only to this server. Add it on the pages of other servers to back it up there too
+	if (model->server_idents.size() > 1)
+	{
+		dir.servers.push_back(ident);
+		dir.servers_from_client = true;
+	}
+	else
+	{
+		dir.servers_from_client = false;
+	}
+	model->dirs.push_back(dir);
+	model->modified = true;
+	refresh();
+}
+
+void ServerPathsPage::OnRemove(wxCommandEvent& event)
+{
+	int sel = selectedDir();
+	if (sel < 0 || model->dirs[sel].server_default != 0)
+		return;
+
+	SBackupDir& dir = model->dirs[sel];
+	if (dir.servers.empty())
+	{
+		//All servers: all others from now on
+		for (size_t i = 0; i < model->server_idents.size(); ++i)
+		{
+			if (model->server_idents[i] != ident)
+				dir.servers.push_back(model->server_idents[i]);
+		}
+	}
+	else
+	{
+		dir.servers.erase(std::remove(dir.servers.begin(), dir.servers.end(), ident), dir.servers.end());
+	}
+	dir.servers_from_client = true;
+
+	if (dir.servers.empty())
+	{
+		//No server backs it up anymore
+		model->dirs.erase(model->dirs.begin() + sel);
+	}
+	model->modified = true;
+	refresh();
+}
+
 ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)
 	: wxDialog(parent, wxID_ANY, _("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
 	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa),
-	selected(-1), current_pages(NULL)
+	selected(-1), current_pages(NULL), paths_loaded(false)
 {
 	wxBoxSizer* top = new wxBoxSizer(wxVERTICAL);
 
@@ -578,12 +829,6 @@ ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& 
 
 	//The other configuration windows (opened in this process, so without another elevation)
 	wxBoxSizer* bottom = new wxBoxSizer(wxHORIZONTAL);
-	if (!MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, capa))
-	{
-		wxButton* btn = new wxButton(this, wxID_ANY, _("Backup paths..."));
-		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openPaths(this); });
-		bottom->Add(btn, 0, wxALL, 5);
-	}
 	if (!MyTimer::hasCapability(DONT_SHOW_LOGS, capa))
 	{
 		wxButton* btn = new wxButton(this, wxID_ANY, _("Logs..."));
@@ -768,8 +1013,13 @@ void ClientSettingsDialog::selectServer(int idx)
 	selected = idx;
 	highlightSelected();
 
+	//Stay on the same page (e.g. "Paths") when switching to another server
+	wxString page_text;
 	if (current_pages != NULL)
 	{
+		int page = current_pages->GetSelection();
+		if (page >= 0)
+			page_text = current_pages->GetPageText(page);
 		current_pages->Hide();
 		current_pages = NULL;
 	}
@@ -802,6 +1052,31 @@ void ClientSettingsDialog::selectServer(int idx)
 			wxNotebook* pages = s->takePages(m_pages);
 			m_pages->GetSizer()->Add(pages, 1, wxEXPAND | wxALL, 5);
 			server_pages[ident] = pages;
+
+			//The paths backed up to this server, after the backup type pages
+			if (!paths_loaded)
+			{
+				paths.dirs = Connector::getSharedPaths();
+				paths_loaded = true;
+			}
+			paths.server_idents.clear();
+			for (size_t i = 0; i < entries.size(); ++i)
+			{
+				if (entries[i].ident.empty())
+					continue;
+				paths.server_idents.push_back(entries[i].ident);
+				paths.server_names[entries[i].ident] = ServersPanel::displayName(entries[i]);
+			}
+			ServerPathsPage* paths_page = new ServerPathsPage(pages, &paths, ident,
+				MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, capa));
+			size_t pos = 0;
+			while (pos < pages->GetPageCount()
+				&& (pages->GetPageText(pos) == _("File backups") || pages->GetPageText(pos) == _("Image backups")))
+			{
+				++pos;
+			}
+			pages->InsertPage(pos, paths_page, _("Paths"));
+			paths_pages[ident] = paths_page;
 		}
 		else
 		{
@@ -818,7 +1093,20 @@ void ClientSettingsDialog::selectServer(int idx)
 		}
 
 		current_pages = server_pages[ident];
+		if (!page_text.empty())
+		{
+			for (size_t i = 0; i < current_pages->GetPageCount(); ++i)
+			{
+				if (current_pages->GetPageText(i) == page_text)
+				{
+					current_pages->SetSelection(i);
+					break;
+				}
+			}
+		}
 		current_pages->Show();
+		//The paths may have been changed on the page of another server
+		paths_pages[ident]->refresh();
 	}
 
 	m_pages->Layout();
@@ -932,6 +1220,13 @@ void ClientSettingsDialog::OnOk(wxCommandEvent& event)
 		}
 	}
 
+	if (paths.modified
+		&& !Connector::saveSharedPaths(paths.dirs))
+	{
+		wxMessageBox(_("Saving the changed paths to backup failed"), wxT("UrBackup"), wxOK | wxCENTRE | wxICON_ERROR, this);
+		return;
+	}
+
 	if (!m_computername->GetValue().empty()
 		&& m_computername->GetValue() != computername_orig)
 	{
@@ -955,8 +1250,8 @@ void ClientSettingsDialog::OnOk(wxCommandEvent& event)
 
 void ClientSettingsDialog::OnCancel(wxCommandEvent& event)
 {
-	if (modified
-		&& wxMessageBox(_("Discard the changes to the server list?"), wxT("UrBackup"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
+	if ((modified || paths.modified)
+		&& wxMessageBox(_("Discard the changes to the servers and backup paths?"), wxT("UrBackup"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
 	{
 		return;
 	}
