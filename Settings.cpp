@@ -1379,6 +1379,29 @@ void Settings::OnDisableImageBackups( wxCommandEvent& event )
 	}		
 }
 
+namespace
+{
+	//Explains where the value of a setting comes from and what a click changes
+	void setSourceTooltip(wxBitmapButton* btn, int use)
+	{
+		if (use == c_use_value_client)
+		{
+			btn->SetToolTip(_("The value is set here on this computer and overrides the server. "
+				"Click to use the server's default value instead."));
+		}
+		else if (use == c_use_group)
+		{
+			btn->SetToolTip(_("The value is the server's default (the same for all clients in the group). "
+				"Click to use the value set on the server for this computer instead."));
+		}
+		else
+		{
+			btn->SetToolTip(_("The value is set on the server for this computer. "
+				"Click to set the value here on this computer instead."));
+		}
+	}
+}
+
 void Settings::OnBitmapBtnClick(wxCommandEvent & event)
 {
 	std::wstring& key = button_ids[event.GetId()];
@@ -1397,16 +1420,19 @@ void Settings::OnBitmapBtnClick(wxCommandEvent & event)
 	if (use == c_use_value_client)
 	{
 		setting.btn->SetBitmapLabel(fa_client_img_scaled);
+		setSourceTooltip(setting.btn, c_use_value_client);
 		val = setting.value_client;
 	}
 	else if (use == c_use_group)
 	{
 		setting.btn->SetBitmapLabel(fa_lock_img_scaled);
+		setSourceTooltip(setting.btn, c_use_group);
 		val = setting.value_group;
 	}
 	else
 	{
 		setting.btn->SetBitmapLabel(fa_home_img_scaled);
+		setSourceTooltip(setting.btn, c_use_value);
 		val = setting.value_home;
 	}
 
@@ -1450,6 +1476,7 @@ void Settings::OnCtlChange(wxCommandEvent & event)
 	}	
 
 	setting.btn->SetBitmapLabel(fa_client_img_scaled);
+	setSourceTooltip(setting.btn, c_use_value_client);
 }
 
 std::wstring Settings::transformValToUI(const std::wstring & key, const std::wstring & val)
@@ -1538,14 +1565,17 @@ void Settings::setSettingsSwitch(const std::wstring & key, wxBitmapButton* btn, 
 	if (use == c_use_value_client)
 	{
 		btn->SetBitmapLabel(fa_client_img_scaled);
+		setSourceTooltip(btn, c_use_value_client);
 	}
 	else if (use == c_use_group)
 	{
 		btn->SetBitmapLabel(fa_lock_img_scaled);
+		setSourceTooltip(btn, c_use_group);
 	}
 	else
 	{
 		btn->SetBitmapLabel(fa_home_img_scaled);
+		setSourceTooltip(btn, c_use_value);
 	}
 
 	ctrl_ids[ctrl->GetId()] = key;
