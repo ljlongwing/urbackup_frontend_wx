@@ -77,8 +77,11 @@ struct SStatus
 
 struct SLogEntry
 {
+	SLogEntry() : logid(0), server_known(true) {}
 	int logid;
 	wxString logtime;
+	//False: saved before the client recorded the server of a log
+	bool server_known;
 };
 
 struct SLogLine
@@ -261,7 +264,8 @@ public:
 	static int startImage(bool full, const std::string& server = std::string());
 	//server: change the settings of this server only (empty: all/primary)
 	static bool updateSettings(const std::string &sdata, size_t timeoutms = 5000, const std::string& server = std::string());
-	static std::vector<SLogEntry> getLogEntries(void);
+	//server: only the logs of this server (and the ones saved before the server was recorded)
+	static std::vector<SLogEntry> getLogEntries(const std::string& server = std::string());
 	static std::vector<SLogLine> getLogdata(int logid, int loglevel);
 	static bool setPause(bool b_pause);
 	static bool addNewServer(const std::string &ident);

@@ -836,6 +836,75 @@ void ServerComponentsPage::save()
 }
 #endif
 
+ServerLogsPage::ServerLogsPage(wxWindow* parent, const std::string& ident)
+	: wxPanel(parent, wxID_ANY), ident(ident), loaded(false)
+{
+	wxBoxSizer* top = new wxBoxSizer(wxHORIZONTAL);
+	m_list = new wxListBox(this, wxID_ANY, wxDefaultPosition, wxDLG_UNIT(this, wxSize(150, 150)));
+	top->Add(m_list, 0, wxEXPAND | wxALL, 5);
+
+	wxBoxSizer* right = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* filter = new wxBoxSizer(wxHORIZONTAL);
+	filter->AddStretchSpacer();
+	filter->Add(new wxStaticText(this, wxID_ANY, _("Filter:")), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+	wxString levels[] = { _("Infos"), _("Warnings"), _("Errors") };
+	m_level = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, 3, levels);
+	m_level->SetSelection(0);
+	filter->Add(m_level, 0);
+	right->Add(filter, 0, wxEXPAND | wxALL, 5);
+	m_text = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDLG_UNIT(this, wxSize(220, 150)),
+		wxTE_MULTILINE | wxTE_READONLY);
+	right->Add(m_text, 1, wxEXPAND | wxALL, 5);
+	top->Add(right, 1, wxEXPAND);
+
+	SetSizer(top);
+
+	m_list->Bind(wxEVT_LISTBOX, [this](wxCommandEvent&) { showLog(); });
+	m_level->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { showLog(); });
+}
+
+void ServerLogsPage::load()
+{
+	if (loaded)
+		return;
+	loaded = true;
+
+	entries = Connector::getLogEntries(ident);
+	for (size_t i = 0; i < entries.size(); ++i)
+	{
+		wxLongLong_t logtime;
+		wxString label;
+		if (!entries[i].logtime.empty() && entries[i].logtime.ToLongLong(&logtime))
+		{
+			label = wxDateTime((wxLongLong)(logtime * 1000)).Format(wxT("%Y-%m-%d %H:%M"));
+		}
+		if (!entries[i].server_known)
+		{
+			label += wxT(" ") + _("(server unknown)");
+		}
+		m_list->Append(label);
+	}
+	if (entries.empty())
+	{
+		m_text->SetValue(_("No logs of this server yet."));
+	}
+}
+
+void ServerLogsPage::showLog()
+{
+	int sel = m_list->GetSelection();
+	if (sel < 0 || sel >= static_cast<int>(entries.size()))
+		return;
+	std::vector<SLogLine> data = Connector::getLogdata(entries[sel].logid, m_level->GetSelection());
+	wxString msg;
+	for (size_t i = 0; i < data.size(); ++i)
+	{
+		msg += data[i].msg;
+		msg += wxT("\n");
+	}
+	m_text->SetValue(msg);
+}
+
 ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)
 	: wxDialog(parent, wxID_ANY, _("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
 	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa),
@@ -877,12 +946,6 @@ ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& 
 
 	//The other configuration windows (opened in this process, so without another elevation)
 	wxBoxSizer* bottom = new wxBoxSizer(wxHORIZONTAL);
-	if (!MyTimer::hasCapability(DONT_SHOW_LOGS, capa))
-	{
-		wxButton* btn = new wxButton(this, wxID_ANY, _("Logs..."));
-		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openLogs(this); });
-		bottom->Add(btn, 0, wxALL, 5);
-	}
 	bottom->AddStretchSpacer();
 	wxButton* ok = new wxButton(this, wxID_OK, _("Ok"));
 	wxButton* cancel = new wxButton(this, wxID_CANCEL, _("Cancel"));
@@ -1131,8 +1194,19 @@ void ClientSettingsDialog::selectServer(int idx)
 				components_pages.push_back(components_page);
 			}
 #endif
+			if (!MyTimer::hasCapability(DONT_SHOW_LOGS, server_capa))
+			{
+				pages->AddPage(new ServerLogsPage(pages, ident), _("Logs"));
+			}
+
 			//Pages that take a while to fill are filled when they are shown first
 			pages->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [pages](wxBookCtrlEvent& evt) {
+				if (evt.GetSelection() >= 0)
+				{
+					ServerLogsPage* lp = dynamic_cast<ServerLogsPage*>(pages->GetPage(evt.GetSelection()));
+					if (lp != NULL)
+						lp->load();
+				}
 #ifdef _WIN32
 				if (evt.GetSelection() >= 0)
 				{

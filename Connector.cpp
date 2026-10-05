@@ -712,9 +712,9 @@ bool Connector::updateSettings(const std::string &ndata, size_t timeoutms, const
 		return true;
 }
 
-std::vector<SLogEntry> Connector::getLogEntries(void)
+std::vector<SLogEntry> Connector::getLogEntries(const std::string& server)
 {
-	std::string d=getResponse("GET LOGPOINTS", "", true);
+	std::string d=getResponse("GET LOGPOINTS", server.empty() ? std::string() : "server="+EscapeParamString(server), true);
 	int lc=linecount(d);
 	std::vector<SLogEntry> ret;
 	for(int i=0;i<lc;++i)
@@ -724,6 +724,12 @@ std::vector<SLogEntry> Connector::getLogEntries(void)
 		SLogEntry le;
 		le.logid=atoi(getuntil("-", l).c_str() );
 		std::string lt=getafter("-", l);
+		if (!server.empty())
+		{
+			//"id-time-known"
+			le.server_known = getafter("-", lt) != "0";
+			lt = getuntil("-", lt);
+		}
 		le.logtime=wxString::FromUTF8(lt.c_str());
 		ret.push_back(le);
 	}

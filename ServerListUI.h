@@ -150,6 +150,26 @@ private:
 };
 #endif
 
+//"Logs" page of a server: the logs of its backups
+class ServerLogsPage : public wxPanel
+{
+public:
+	ServerLogsPage(wxWindow* parent, const std::string& ident);
+
+	//Reads the logs the first time the page is shown
+	void load();
+
+private:
+	void showLog();
+
+	std::string ident;
+	bool loaded;
+	std::vector<SLogEntry> entries;
+	wxListBox* m_list;
+	wxChoice* m_level;
+	wxTextCtrl* m_text;
+};
+
 //Settings window of the client: computer name, the servers (a click on one shows
 //its backup settings below) and the other configuration windows
 class Settings;
