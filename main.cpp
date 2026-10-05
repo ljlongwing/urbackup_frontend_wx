@@ -96,10 +96,21 @@ IMPLEMENT_APP_NO_MAIN(MyApp)
 
 HRESULT initCom()
 {
-	HRESULT hr = CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+	//Can only be done once per process (the settings window reads the components of each server)
+	static bool done = false;
+	static HRESULT hr = S_OK;
+	if (done)
+	{
+		return hr;
+	}
+	done = true;
+
+	hr = CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
 		RPC_C_IMP_LEVEL_IDENTIFY, NULL, EOAC_NONE, NULL);
 
-	if (hr != S_OK)
+	//RPC_E_TOO_LATE: COM was already used in this process (e.g. by a file dialog). The
+	//components can still be read
+	if (hr != S_OK && hr != RPC_E_TOO_LATE)
 	{
 		wxMessageBox(wxString::Format(_("CoInitializeSecurity failed: %08x"), hr), wxT("UrBackup"), wxOK | wxICON_ERROR);
 	}
