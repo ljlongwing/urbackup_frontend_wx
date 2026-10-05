@@ -852,8 +852,8 @@ ServerLogsPage::ServerLogsPage(wxWindow* parent, const std::string& ident)
 	m_level->SetSelection(0);
 	filter->Add(m_level, 0);
 	right->Add(filter, 0, wxEXPAND | wxALL, 5);
-	m_text = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDLG_UNIT(this, wxSize(220, 150)),
-		wxTE_MULTILINE | wxTE_READONLY);
+	m_text = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDLG_UNIT(this, wxSize(260, 150)),
+		wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH2 | wxTE_DONTWRAP);
 	right->Add(m_text, 1, wxEXPAND | wxALL, 5);
 	top->Add(right, 1, wxEXPAND);
 
@@ -895,14 +895,57 @@ void ServerLogsPage::showLog()
 	int sel = m_list->GetSelection();
 	if (sel < 0 || sel >= static_cast<int>(entries.size()))
 		return;
-	std::vector<SLogLine> data = Connector::getLogdata(entries[sel].logid, m_level->GetSelection());
-	wxString msg;
+	std::vector<SLogLine> data = Connector::getLogdata(entries[sel].logid, m_level->GetSelection(), true);
+
+	//Time of each line, warnings and errors marked and coloured
+	m_text->Freeze();
+	m_text->Clear();
+	wxTextAttr normal(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
+	wxTextAttr time_attr(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+	wxTextAttr warning(wxColour(176, 112, 0));
+	wxTextAttr error(wxColour(192, 0, 0));
+	//Only the time, unless the log goes over more than one day (e.g. a backup past midnight)
+	wxString time_format = wxT("%H:%M:%S  ");
+	wxString first_date;
 	for (size_t i = 0; i < data.size(); ++i)
 	{
-		msg += data[i].msg;
-		msg += wxT("\n");
+		if (data[i].ltime <= 0)
+			continue;
+		wxString date = wxDateTime(static_cast<time_t>(data[i].ltime)).Format(wxT("%Y-%m-%d"));
+		if (first_date.empty())
+			first_date = date;
+		else if (date != first_date)
+		{
+			time_format = wxT("%Y-%m-%d %H:%M:%S  ");
+			break;
+		}
 	}
-	m_text->SetValue(msg);
+	for (size_t i = 0; i < data.size(); ++i)
+	{
+		if (data[i].ltime > 0)
+		{
+			m_text->SetDefaultStyle(time_attr);
+			m_text->AppendText(wxDateTime(static_cast<time_t>(data[i].ltime)).Format(time_format));
+		}
+		if (data[i].loglevel >= 2)
+		{
+			m_text->SetDefaultStyle(error);
+			m_text->AppendText(_("ERROR:") + wxT(" "));
+		}
+		else if (data[i].loglevel == 1)
+		{
+			m_text->SetDefaultStyle(warning);
+			m_text->AppendText(_("WARNING:") + wxT(" "));
+		}
+		else
+		{
+			m_text->SetDefaultStyle(normal);
+		}
+		m_text->AppendText(data[i].msg + wxT("\n"));
+	}
+	m_text->SetDefaultStyle(normal);
+	m_text->SetInsertionPoint(0);
+	m_text->Thaw();
 }
 
 ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)

@@ -736,9 +736,10 @@ std::vector<SLogEntry> Connector::getLogEntries(const std::string& server)
 	return ret;
 }
 
-std::vector<SLogLine>  Connector::getLogdata(int logid, int loglevel)
+std::vector<SLogLine>  Connector::getLogdata(int logid, int loglevel, bool with_time)
 {
-	std::string d=getResponse("GET LOGDATA","logid="+nconvert(logid)+"&loglevel="+nconvert(loglevel), true);
+	std::string d=getResponse("GET LOGDATA","logid="+nconvert(logid)+"&loglevel="+nconvert(loglevel)
+		+ (with_time ? "&with_time=1" : ""), true);
 	std::vector<std::string> lines;
 	TokenizeMail(d, lines, "\n");
 	std::vector<SLogLine> ret;
@@ -748,7 +749,24 @@ std::vector<SLogLine>  Connector::getLogdata(int logid, int loglevel)
 		if(l.empty())continue;
 		SLogLine ll;
 		ll.loglevel=atoi(getuntil("-", l).c_str());
-		ll.msg=wxString::FromUTF8(getafter("-", l).c_str());
+		std::string msg = getafter("-", l);
+		if (with_time)
+		{
+			//"level-time-message"; an older backend sends "level-message"
+			std::string t = getuntil("-", msg);
+			bool isnum = !t.empty();
+			for (size_t j = 0; j < t.size(); ++j)
+			{
+				if (t[j] < '0' || t[j] > '9')
+					isnum = false;
+			}
+			if (isnum)
+			{
+				ll.ltime = atoll(t.c_str());
+				msg = getafter("-", msg);
+			}
+		}
+		ll.msg=wxString::FromUTF8(msg.c_str());
 		ret.push_back(ll);
 	}
 	return ret;

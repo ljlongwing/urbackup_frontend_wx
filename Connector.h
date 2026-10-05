@@ -86,8 +86,11 @@ struct SLogEntry
 
 struct SLogLine
 {
+	SLogLine() : loglevel(0), ltime(0) {}
 	int loglevel;
 	wxString msg;
+	//Unix time of the line (0: unknown or not requested)
+	int64 ltime;
 };
 
 struct SRunningProcess
@@ -266,7 +269,8 @@ public:
 	static bool updateSettings(const std::string &sdata, size_t timeoutms = 5000, const std::string& server = std::string());
 	//server: only the logs of this server (and the ones saved before the server was recorded)
 	static std::vector<SLogEntry> getLogEntries(const std::string& server = std::string());
-	static std::vector<SLogLine> getLogdata(int logid, int loglevel);
+	//with_time: also get the time of each line (newer backends)
+	static std::vector<SLogLine> getLogdata(int logid, int loglevel, bool with_time = false);
 	static bool setPause(bool b_pause);
 	static bool addNewServer(const std::string &ident);
 	static SStatusDetails getStatusDetails(SConnection* connection = NULL);
