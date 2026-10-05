@@ -17,6 +17,12 @@
 
 #include "ServerListUI.h"
 #include "stringtools.h"
+#include "Settings.h"
+#include "main.h"
+#include "capa_bits.h"
+#include <wx/datetime.h>
+
+wxTextValidator getPathValidator(void);
 
 namespace
 {
@@ -437,4 +443,307 @@ void ServersPanel::OnTrust(wxCommandEvent& event)
 		pending = server_list.pending;
 	}
 	fillList();
+}
+
+namespace
+{
+	enum
+	{
+		//Buttons of a server row: ID_SERVER_BUTTON + 3*index + action
+		ID_SERVER_BUTTON = wxID_HIGHEST + 100,
+		SERVER_ACTION_SETTINGS = 0,
+		SERVER_ACTION_EDIT = 1,
+		SERVER_ACTION_REMOVE = 2
+	};
+
+	wxString displayName(const SServerListEntry& entry)
+	{
+		return ServersPanel::displayName(entry);
+	}
+
+	wxString lastBackupText(const SServerListEntry& entry)
+	{
+		if (entry.last_backup <= 0)
+			return _("Never");
+		return wxDateTime(static_cast<time_t>(entry.last_backup)).Format(wxT("%Y-%m-%d %H:%M"));
+	}
+
+	wxStaticText* boldText(wxWindow* parent, const wxString& text)
+	{
+		wxStaticText* ret = new wxStaticText(parent, wxID_ANY, text);
+		wxFont font = ret->GetFont();
+		font.SetWeight(wxFONTWEIGHT_BOLD);
+		ret->SetFont(font);
+		return ret;
+	}
+}
+
+ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)
+	: wxDialog(parent, wxID_ANY, _("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
+	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa)
+{
+	wxBoxSizer* top = new wxBoxSizer(wxVERTICAL);
+
+	//The computer name is the same for all servers
+	wxBoxSizer* name_row = new wxBoxSizer(wxHORIZONTAL);
+	name_row->Add(new wxStaticText(this, wxID_ANY, _("Computer name:")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+	computername_orig = Settings::currentComputerName();
+	m_computername = new wxTextCtrl(this, wxID_ANY, computername_orig, wxDefaultPosition, wxDLG_UNIT(this, wxSize(120, -1)));
+	m_computername->SetValidator(getPathValidator());
+	name_row->Add(m_computername, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+	top->Add(name_row, 0, wxALL, 5);
+
+	wxBoxSizer* servers_header = new wxBoxSizer(wxHORIZONTAL);
+	servers_header->Add(boldText(this, _("Servers")), 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+	servers_header->AddStretchSpacer();
+	m_trust = new wxButton(this, wxID_ANY, _("Trust new server..."));
+	servers_header->Add(m_trust, 0, wxALL, 5);
+	wxButton* add = new wxButton(this, wxID_ANY, _("+ Add server"));
+	servers_header->Add(add, 0, wxALL, 5);
+	top->Add(servers_header, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
+
+	m_servers = new wxPanel(this, wxID_ANY);
+	top->Add(m_servers, 1, wxEXPAND | wxLEFT | wxRIGHT, 10);
+
+	//The other configuration windows (opened in this process, so without another elevation)
+	wxBoxSizer* bottom = new wxBoxSizer(wxHORIZONTAL);
+	if (!MyTimer::hasCapability(DONT_ALLOW_CONFIG_PATHS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Backup paths..."));
+		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openPaths(this); });
+		bottom->Add(btn, 0, wxALL, 5);
+	}
+	if (!MyTimer::hasCapability(DONT_SHOW_LOGS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Logs..."));
+		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openLogs(this); });
+		bottom->Add(btn, 0, wxALL, 5);
+	}
+#ifdef _WIN32
+	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_CONFIG, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Components..."));
+		btn->SetToolTip(_("Configure components to backup"));
+		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openComponents(this); });
+		bottom->Add(btn, 0, wxALL, 5);
+	}
+	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_RESTORE, capa)
+		&& !MyTimer::hasCapability(STATUS_NO_COMPONENTS, capa))
+	{
+		wxButton* btn = new wxButton(this, wxID_ANY, _("Restore components..."));
+		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openRestoreComponents(this); });
+		bottom->Add(btn, 0, wxALL, 5);
+	}
+#endif
+	bottom->AddStretchSpacer();
+	wxButton* ok = new wxButton(this, wxID_OK, _("Ok"));
+	wxButton* cancel = new wxButton(this, wxID_CANCEL, _("Cancel"));
+	bottom->Add(ok, 0, wxALL, 5);
+	bottom->Add(cancel, 0, wxALL, 5);
+	top->Add(bottom, 0, wxEXPAND | wxALL, 5);
+
+	SetSizer(top);
+
+	add->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnAdd, this);
+	m_trust->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnTrust, this);
+	m_servers->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnServerButton, this);
+	ok->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnOk, this);
+	cancel->Bind(wxEVT_BUTTON, &ClientSettingsDialog::OnCancel, this);
+
+	fillServers();
+	Centre();
+}
+
+void ClientSettingsDialog::fillServers()
+{
+	m_servers->DestroyChildren();
+
+	wxFlexGridSizer* grid = new wxFlexGridSizer(7, wxDLG_UNIT(this, wxSize(6, 2)));
+	grid->Add(boldText(m_servers, _("Name")));
+	grid->Add(boldText(m_servers, _("Identity")));
+	grid->Add(boldText(m_servers, _("Local")));
+	grid->Add(boldText(m_servers, _("Internet")));
+	grid->Add(boldText(m_servers, _("Status")));
+	grid->Add(boldText(m_servers, _("Last backup")));
+	grid->Add(new wxStaticText(m_servers, wxID_ANY, wxEmptyString));
+
+	for (size_t i = 0; i < entries.size(); ++i)
+	{
+		const SServerListEntry& e = entries[i];
+		wxString name = displayName(e);
+		if (!primary.empty() && e.ident == primary && entries.size() > 1)
+			name += wxT(" ") + _("(primary)");
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, name), 0, wxALIGN_CENTER_VERTICAL);
+		wxStaticText* fp = new wxStaticText(m_servers, wxID_ANY, fingerprintText(e));
+		if (!e.fingerprint.empty())
+			fp->SetToolTip(wxString::FromUTF8(e.fingerprint.c_str()));
+		grid->Add(fp, 0, wxALIGN_CENTER_VERTICAL);
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.local ? wxString::FromUTF8("\xE2\x9C\x93") : wxString()), 0, wxALIGN_CENTER);
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.internet ? wxString::FromUTF8("\xE2\x9C\x93") : wxString()), 0, wxALIGN_CENTER);
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, statusText(e)), 0, wxALIGN_CENTER_VERTICAL);
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, e.ident.empty() ? wxString(wxT("-")) : lastBackupText(e)), 0, wxALIGN_CENTER_VERTICAL);
+
+		wxBoxSizer* buttons = new wxBoxSizer(wxHORIZONTAL);
+		int base = ID_SERVER_BUTTON + 3 * static_cast<int>(i);
+		wxButton* settings = new wxButton(m_servers, base + SERVER_ACTION_SETTINGS, _("Backup settings..."));
+		//Backup settings exist once the server has connected (and is saved in the list)
+		settings->Enable(!e.ident.empty());
+		buttons->Add(settings, 0, wxRIGHT, 3);
+		buttons->Add(new wxButton(m_servers, base + SERVER_ACTION_EDIT, _("Edit...")), 0, wxRIGHT, 3);
+		buttons->Add(new wxButton(m_servers, base + SERVER_ACTION_REMOVE, _("Remove")), 0);
+		grid->Add(buttons, 0, wxALIGN_CENTER_VERTICAL);
+	}
+
+	if (entries.empty())
+	{
+		grid->Add(new wxStaticText(m_servers, wxID_ANY, _("No servers yet. Add one, or wait for a server in the local network to find this computer.")));
+	}
+
+	m_servers->SetSizer(grid, true);
+
+	m_trust->Show(!pending.empty());
+
+	m_servers->Layout();
+	GetSizer()->Layout();
+	GetSizer()->Fit(this);
+}
+
+void ClientSettingsDialog::OnServerButton(wxCommandEvent& event)
+{
+	int id = event.GetId() - ID_SERVER_BUTTON;
+	if (id < 0)
+	{
+		event.Skip();
+		return;
+	}
+	size_t idx = static_cast<size_t>(id / 3);
+	int action = id % 3;
+	if (idx >= entries.size())
+	{
+		event.Skip();
+		return;
+	}
+
+	if (action == SERVER_ACTION_SETTINGS)
+	{
+		Settings* s = new Settings(this, entries[idx].ident, true, true);
+		s->ShowModal();
+		s->Destroy();
+	}
+	else if (action == SERVER_ACTION_EDIT)
+	{
+		ServerEditDialog dlg(this, entries[idx]);
+		if (dlg.ShowModal() == wxID_OK)
+		{
+			entries[idx] = dlg.getEntry();
+			modified = true;
+			fillServers();
+		}
+	}
+	else if (action == SERVER_ACTION_REMOVE)
+	{
+		wxString msg = wxString::Format(_("Remove server \"%s\"? The client will no longer trust it, "
+			"so it cannot back up this computer anymore until it is added again."), displayName(entries[idx]));
+		if (wxMessageBox(msg, _("Remove server"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
+			return;
+		entries.erase(entries.begin() + idx);
+		modified = true;
+		//The buttons are destroyed by fillServers, which is called from their event handler
+		CallAfter(&ClientSettingsDialog::fillServers);
+	}
+}
+
+void ClientSettingsDialog::OnAdd(wxCommandEvent& event)
+{
+	SServerListEntry entry;
+	entry.id = -1;
+	entry.local = false;
+	entry.internet = true;
+	ServerEditDialog dlg(this, entry);
+	if (dlg.ShowModal() == wxID_OK)
+	{
+		entries.push_back(dlg.getEntry());
+		modified = true;
+		fillServers();
+	}
+}
+
+void ClientSettingsDialog::OnTrust(wxCommandEvent& event)
+{
+	if (pending.empty())
+		return;
+
+	wxArrayString choices;
+	for (size_t i = 0; i < pending.size(); ++i)
+	{
+		choices.Add(wxString::FromUTF8(pending[i].c_str()));
+	}
+
+	int idx = wxGetSingleChoiceIndex(_("These servers tried to back up this computer, but are not trusted. "
+		"Only trust a server you know."), _("Trust new server"), choices, this);
+	if (idx < 0)
+		return;
+
+	if (!Connector::addNewServer(pending[idx]))
+	{
+		wxMessageBox(_("Trusting the server failed."), _("Trust new server"), wxOK | wxICON_ERROR, this);
+		return;
+	}
+
+	SServerList server_list = Connector::getServerList();
+	if (server_list.supported)
+	{
+		//Keep local edits, add the newly trusted server
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			bool found = false;
+			for (size_t j = 0; j < entries.size(); ++j)
+			{
+				if (entries[j].id == server_list.entries[i].id)
+				{
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+			{
+				entries.push_back(server_list.entries[i]);
+			}
+		}
+		pending = server_list.pending;
+	}
+	CallAfter(&ClientSettingsDialog::fillServers);
+}
+
+void ClientSettingsDialog::OnOk(wxCommandEvent& event)
+{
+	if (!m_computername->GetValue().empty()
+		&& m_computername->GetValue() != computername_orig)
+	{
+		//settings.cfg (the primary server's file) has the computer name
+		if (!Connector::updateSettings("computername=" + std::string(m_computername->GetValue().ToUTF8()) + "\n", 5000, primary))
+		{
+			wxMessageBox(_("Saving the computer name failed."), wxT("UrBackup"), wxOK | wxICON_ERROR, this);
+			return;
+		}
+	}
+
+	if (modified
+		&& !Connector::setServerList(entries))
+	{
+		wxMessageBox(_("Saving the server list failed."), wxT("UrBackup"), wxOK | wxICON_ERROR, this);
+		return;
+	}
+
+	EndModal(wxID_OK);
+}
+
+void ClientSettingsDialog::OnCancel(wxCommandEvent& event)
+{
+	if (modified
+		&& wxMessageBox(_("Discard the changes to the server list?"), wxT("UrBackup"), wxYES_NO | wxICON_QUESTION, this) != wxYES)
+	{
+		return;
+	}
+	EndModal(wxID_CANCEL);
 }

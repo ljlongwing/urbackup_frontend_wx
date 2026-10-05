@@ -37,7 +37,10 @@ class Settings : public GUISettings
 {
 public:
 	//server_ident: show/edit the backup settings of this server (empty: primary server)
-	Settings(wxWindow* parent, const std::string& server_ident = std::string(), bool access_pw_checked = false);
+	//per_server: opened from the client settings window for one server (no server list,
+	//no computer name, settings grouped by incremental/full)
+	Settings(wxWindow* parent, const std::string& server_ident = std::string(), bool access_pw_checked = false,
+		bool per_server = false);
 	virtual ~Settings(void);
 
 	virtual void OnOkClick( wxCommandEvent& event );
@@ -53,8 +56,20 @@ public:
 	void OnOpenComponents(wxCommandEvent& event);
 	void OnOpenRestoreComponents(wxCommandEvent& event);
 
+	//Used by the client settings window too
+	static void openPaths(wxWindow* parent);
+	static void openLogs(wxWindow* parent);
+	static void openComponents(wxWindow* parent);
+	static void openRestoreComponents(wxWindow* parent);
+	//Asks for the tray access text if one is configured. False if canceled
+	static bool checkTrayAccessPw(wxWindow* parent);
+	static wxString currentComputerName();
+
 private:
 	void addWindowButtons();
+	void applyGroupedLayout();
+
+	bool per_server;
 
 	std::wstring transformValToUI(const std::wstring& key, const std::wstring& val);
 	std::wstring transformValFromUI(const std::wstring& key, const std::wstring& val);

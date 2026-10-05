@@ -82,3 +82,30 @@ private:
 	wxButton* m_remove;
 	wxButton* m_trust;
 };
+
+//Settings window of the client: computer name, the servers (with their backup
+//settings) and the other configuration windows
+class ClientSettingsDialog : public wxDialog
+{
+public:
+	ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa);
+
+private:
+	void fillServers();
+	void OnAdd(wxCommandEvent& event);
+	void OnTrust(wxCommandEvent& event);
+	void OnServerButton(wxCommandEvent& event);
+	void OnOk(wxCommandEvent& event);
+	void OnCancel(wxCommandEvent& event);
+
+	std::vector<SServerListEntry> entries;
+	std::vector<std::string> pending;
+	std::string primary;
+	bool modified;
+	int capa;
+	wxString computername_orig;
+
+	wxTextCtrl* m_computername;
+	wxPanel* m_servers;
+	wxButton* m_trust;
+};

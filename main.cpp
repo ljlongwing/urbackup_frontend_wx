@@ -373,6 +373,21 @@ bool MyApp::OnInit()
 	}
 	else if(cmd==wxT("settings"))
 	{
+		SServerList server_list = Connector::getServerList();
+		if (server_list.supported)
+		{
+			//Client settings window with the server list; backup settings per server
+			if (Settings::checkTrayAccessPw(NULL))
+			{
+				ClientSettingsDialog* d = new ClientSettingsDialog(NULL, server_list, Connector::getCapabilities());
+				SetTopWindow(d);
+				d->ShowModal();
+				d->Destroy();
+			}
+			wxExit();
+			return true;
+		}
+
 		std::string server;
 		bool access_pw_checked = false;
 		while (true)

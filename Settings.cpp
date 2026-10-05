@@ -171,24 +171,19 @@ namespace
 	}
 }
 
-Settings::Settings(wxWindow* parent, const std::string& server_ident, bool access_pw_checked) : GUISettings(parent),
-	init_complete(false), servers_panel(NULL), m_serverChoice(NULL)
+bool Settings::checkTrayAccessPw(wxWindow* parent)
 {
-	SetIcon(wxIcon(res_path+wxT("backup-ok.")+ico_ext, ico_type));
-	settings=new CFileSettingsReader(settingsFilePath("settings.cfg"));
-
+	CFileSettingsReader settings(settingsFilePath("settings.cfg"));
 	std::wstring client_settings_tray_access_pw;
-	if (!access_pw_checked
-		&& getSettingsValue(L"client_settings_tray_access_pw", &client_settings_tray_access_pw, settings)
+	if (getSettingsValue(L"client_settings_tray_access_pw", &client_settings_tray_access_pw, &settings)
 		&& !client_settings_tray_access_pw.empty())
 	{
 		do
 		{
-			wxPasswordEntryDialog* pwEntry = new wxPasswordEntryDialog(this, _("Please enter the tray access text"));
+			wxPasswordEntryDialog* pwEntry = new wxPasswordEntryDialog(parent, _("Please enter the tray access text"));
 			if (pwEntry->ShowModal() != wxID_OK)
 			{
-				Close();
-				return;
+				return false;
 			}
 
 			if (pwEntry->GetValue() == client_settings_tray_access_pw)
@@ -197,15 +192,39 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 			}
 			else
 			{
-				wxDialog* pwWrong = new wxDialog(this, -1, _("Tray access text wrong. Please retry or cancel."));
+				wxDialog* pwWrong = new wxDialog(parent, -1, _("Tray access text wrong. Please retry or cancel."));
 				if (pwWrong->ShowModal() != wxID_OK)
 				{
-					Close();
-					return;
+					return false;
 				}
 
 			}
 		} while (true);
+	}
+	return true;
+}
+
+wxString Settings::currentComputerName()
+{
+	CFileSettingsReader settings(settingsFilePath("settings.cfg"));
+	std::wstring t;
+	if (settings.getValue(L"computername", &t))
+	{
+		return t;
+	}
+	return ConvertToWX(getServerName());
+}
+
+Settings::Settings(wxWindow* parent, const std::string& server_ident, bool access_pw_checked, bool p_per_server) : GUISettings(parent),
+	init_complete(false), servers_panel(NULL), m_serverChoice(NULL), per_server(p_per_server)
+{
+	SetIcon(wxIcon(res_path+wxT("backup-ok.")+ico_ext, ico_type));
+	settings=new CFileSettingsReader(settingsFilePath("settings.cfg"));
+
+	if (!access_pw_checked && !checkTrayAccessPw(this))
+	{
+		Close();
+		return;
 	}
 
 	SServerList server_list = Connector::getServerList();
@@ -577,7 +596,46 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 	m_textCtrl19->SetValidator(wxTextValidator(wxFILTER_DIGITS));
 	m_textCtrl15->SetValidator(getPathValidator());
 
-	if (server_list.supported)
+	if (server_list.supported && per_server)
+	{
+		//The server list and the computer name are in the client settings window
+		const SServerListEntry* entry = NULL;
+		for (size_t i = 0; i < server_list.entries.size(); ++i)
+		{
+			if (server_list.entries[i].ident == selected_server)
+				entry = &server_list.entries[i];
+		}
+		if (entry != NULL)
+		{
+			SetTitle(wxString::Format(_("Backup settings of %s"), ServersPanel::displayName(*entry)));
+		}
+
+		if (settings_not_received)
+		{
+			wxStaticText* notice = new wxStaticText(this, wxID_ANY,
+				_("This server has not sent its settings to this client yet, so the values below may be "
+				"those of another server. They arrive when the client's settings are saved on the server "
+				"or the server restarts."));
+			notice->SetForegroundColour(wxColour(192, 0, 0));
+			notice->Wrap(wxDLG_UNIT(this, wxSize(330, -1)).GetWidth());
+			GetSizer()->Insert(0, notice, 0, wxEXPAND | wxALL, 5);
+		}
+
+		applyGroupedLayout();
+
+		//Backup over internet only matters for a server reached via internet
+		if (entry != NULL && !entry->internet)
+		{
+			int internet_page = m_notebook->FindPage(m_tab_internet);
+			if (internet_page >= 0)
+				m_notebook->RemovePage(internet_page);
+			m_tab_internet->Hide();
+		}
+
+		Layout();
+		Fit();
+	}
+	else if (server_list.supported)
 	{
 		//Each server has its own connection settings in the server list. The internet
 		//tab keeps the backup settings that apply to internet backups
@@ -645,10 +703,156 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 		Fit();
 	}
 
-	addWindowButtons();
+	if (!per_server)
+	{
+		addWindowButtons();
+	}
 
 	Show(true);
 	init_complete = true;
+}
+
+namespace
+{
+	//Grouped layout of a settings page: label, control (with its unit), lock button in aligned columns
+	class SettingsGrid
+	{
+	public:
+		SettingsGrid(wxWindow* parent)
+			: parent(parent), grid(new wxFlexGridSizer(3, 0, 0)), rows(0)
+		{}
+
+		void heading(const wxString& text)
+		{
+			if (rows > 0)
+			{
+				//Space between the groups
+				for (int i = 0; i < 3; ++i)
+					grid->Add(0, 10);
+			}
+			wxStaticText* heading = new wxStaticText(parent, wxID_ANY, text);
+			wxFont font = heading->GetFont();
+			font.SetWeight(wxFONTWEIGHT_BOLD);
+			heading->SetFont(font);
+			grid->Add(heading, 0, wxLEFT | wxRIGHT | wxTOP, 5);
+			for (int i = 0; i < 2; ++i)
+				grid->Add(0, 0);
+			++rows;
+		}
+
+		void row(wxWindow* label, wxWindow* ctrl, wxWindow* unit, wxWindow* btn)
+		{
+			if (label != NULL)
+				grid->Add(label, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+			else
+				grid->Add(0, 0);
+
+			wxBoxSizer* ctrl_unit = new wxBoxSizer(wxHORIZONTAL);
+			if (ctrl != NULL)
+				ctrl_unit->Add(ctrl, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+			if (unit != NULL)
+				ctrl_unit->Add(unit, 0, wxALIGN_CENTER_VERTICAL | wxTOP | wxBOTTOM | wxRIGHT, 5);
+			grid->Add(ctrl_unit, 0, wxALIGN_CENTER_VERTICAL);
+
+			if (btn != NULL)
+				grid->Add(btn, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
+			else
+				grid->Add(0, 0);
+			++rows;
+		}
+
+		wxSizer* sizer() { return grid; }
+
+	private:
+		wxWindow* parent;
+		wxFlexGridSizer* grid;
+		int rows;
+	};
+}
+
+void Settings::applyGroupedLayout()
+{
+	//File backups: interval and number of backups kept, grouped by incremental and full
+	{
+		SettingsGrid g(m_tab_filebackups);
+		g.heading(_("Incremental file backups"));
+		g.row(m_staticText1, m_textCtrl1, m_staticText2, m_bitmapButton1);
+		g.row(m_staticText9, m_textCtrl13, NULL, m_bitmapButton13);
+		g.row(m_staticText10, m_textCtrl131, NULL, m_bitmapButton131);
+		g.heading(_("Full file backups"));
+		g.row(m_staticText3, m_textCtrl2, m_staticText4, m_bitmapButton2);
+		g.row(m_staticText11, m_textCtrl132, NULL, m_bitmapButton132);
+		g.row(m_staticText12, m_textCtrl133, NULL, m_bitmapButton133);
+		g.heading(_("Files"));
+		g.row(m_staticText26, m_textCtrl16, NULL, m_bitmapButton16);
+		g.row(m_staticText261, m_textCtrl161, NULL, m_bitmapButton161);
+		m_staticText30->Hide();
+		m_staticText29->Hide();
+		m_tab_filebackups->SetSizer(g.sizer(), true);
+	}
+#ifdef _WIN32
+	if (!MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
+	{
+		SettingsGrid g(m_tab_imagebackups);
+		g.row(m_checkBox1, NULL, NULL, NULL);
+		g.heading(_("Incremental image backups"));
+		g.row(m_staticText6, m_textCtrl21, m_staticText41, m_bitmapButton21);
+		g.row(m_staticText14, m_textCtrl134, NULL, m_bitmapButton134);
+		g.row(m_staticText15, m_textCtrl135, NULL, m_bitmapButton135);
+		g.heading(_("Full image backups"));
+		g.row(m_staticText7, m_textCtrl22, m_staticText42, m_bitmapButton22);
+		g.row(m_staticText16, m_textCtrl136, NULL, m_bitmapButton136);
+		g.row(m_staticText17, m_textCtrl137, NULL, m_bitmapButton137);
+		g.heading(_("Volumes"));
+		g.row(m_staticText301, m_textCtrl23, NULL, m_bitmapButton23);
+		m_staticText28->Hide();
+		m_tab_imagebackups->SetSizer(g.sizer(), true);
+	}
+#endif
+	//Client tab: only schedule and speed; the computer name is in the client settings window
+	{
+		SettingsGrid g(m_tab_client);
+		g.heading(_("Schedule"));
+		g.row(m_staticText27, m_textCtrl17, NULL, m_bitmapButton17);
+		g.row(m_staticText281, m_textCtrl19, m_staticText291, m_bitmapButton19);
+		g.heading(_("Limits"));
+		g.row(m_staticTextLocalSpeed, m_textCtrlLocalSpeed, m_staticTextLocalSpeedUnit, m_bitmapButtonLocalSpeed);
+		m_staticText25->Hide();
+		m_textCtrl15->Hide();
+		m_tab_client->SetSizer(g.sizer(), true);
+		int page = m_notebook->FindPage(m_tab_client);
+		if (page >= 0)
+			m_notebook->SetPageText(page, _("Schedule & limits"));
+	}
+	//Internet tab: only what is backed up over internet; the connection is in the server list
+	{
+		SettingsGrid g(m_tab_internet);
+		g.heading(_("Backups over internet"));
+#ifdef _WIN32
+		if (!MyTimer::hasCapability(DONT_DO_IMAGE_BACKUPS, capa))
+		{
+			g.row(m_staticTextInternetImage, m_checkBoxInternetImage, NULL, m_bitmapButtonInternetImage);
+		}
+#endif
+		g.row(m_staticTextInternetFullFile, m_checkBoxInternetFullFile, NULL, m_bitmapButtonInternetFullFile);
+		g.row(m_staticTextInternetSpeed, m_textCtrlInternetSpeed, m_staticTextInternetSpeedUnit, m_bitmapButtonInternetSpeed);
+		wxWindow* connection_ctrls[] = { m_staticTextInternetEnabled, m_checkBoxInternetEnabled,
+			m_staticInternetServer, m_textCtrlInternetServer, m_staticInternetServerProxy, m_textCtrlInternetServerProxy,
+			m_staticInternetServerAuthkey, m_textCtrlInternetServerAuthkey,
+			m_staticTextInternetCompress, m_checkBoxInternetCompress, m_bitmapButtonInternetCompress,
+			m_staticTextInternetEncrypt, m_checkBoxInternetEncrypt, m_bitmapButtonInternetEncrypt };
+		for (size_t i = 0; i < sizeof(connection_ctrls) / sizeof(connection_ctrls[0]); ++i)
+		{
+			if (connection_ctrls[i] != NULL)
+				connection_ctrls[i]->Hide();
+		}
+		m_tab_internet->SetSizer(g.sizer(), true);
+	}
+
+	//Each page as large as its content
+	m_tab_filebackups->Layout();
+	m_tab_client->Layout();
+	m_tab_internet->Layout();
 }
 
 void Settings::addWindowButtons()
@@ -698,38 +902,58 @@ void Settings::addWindowButtons()
 	}
 }
 
-void Settings::OnOpenPaths(wxCommandEvent& event)
+void Settings::openPaths(wxWindow* parent)
 {
-	ConfigPath* cp = new ConfigPath(this);
+	ConfigPath* cp = new ConfigPath(parent);
 	cp->ShowModal();
 	cp->Destroy();
 }
 
-void Settings::OnOpenLogs(wxCommandEvent& event)
+void Settings::openLogs(wxWindow* parent)
 {
-	Logs* l = new Logs(this);
+	Logs* l = new Logs(parent);
 	l->ShowModal();
 	l->Destroy();
 }
 
-void Settings::OnOpenComponents(wxCommandEvent& event)
+void Settings::openComponents(wxWindow* parent)
 {
 #ifdef _WIN32
 	initCom();
-	SelectWindowsComponents* cp = new SelectWindowsComponents(this);
+	SelectWindowsComponents* cp = new SelectWindowsComponents(parent);
 	cp->ShowModal();
 	cp->Destroy();
 #endif
 }
 
-void Settings::OnOpenRestoreComponents(wxCommandEvent& event)
+void Settings::openRestoreComponents(wxWindow* parent)
 {
 #ifdef _WIN32
 	initCom();
-	SelectRestoreComponents* cp = new SelectRestoreComponents(this);
+	SelectRestoreComponents* cp = new SelectRestoreComponents(parent);
 	cp->ShowModal();
 	cp->Destroy();
 #endif
+}
+
+void Settings::OnOpenPaths(wxCommandEvent& event)
+{
+	openPaths(this);
+}
+
+void Settings::OnOpenLogs(wxCommandEvent& event)
+{
+	openLogs(this);
+}
+
+void Settings::OnOpenComponents(wxCommandEvent& event)
+{
+	openComponents(this);
+}
+
+void Settings::OnOpenRestoreComponents(wxCommandEvent& event)
+{
+	openRestoreComponents(this);
 }
 
 Settings::~Settings(void)
@@ -999,7 +1223,8 @@ void Settings::OnOkClick( wxCommandEvent& event )
 		s_data += std::string("internet_server_proxy=") + std::string(internet_server_proxy.ToUTF8()) + "\n";
 		s_data += std::string("internet_authkey=") + std::string(internet_authkey.ToUTF8()) + "\n";
 	}
-	if (selected_server.empty() || selected_server == primary_server)
+	if (!per_server
+		&& (selected_server.empty() || selected_server == primary_server))
 	{
 		s_data += std::string("computername=") + std::string(computername.ToUTF8()) + "\n";
 	}
