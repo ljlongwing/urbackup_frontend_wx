@@ -63,8 +63,16 @@ private:
 class SelectWindowsComponents : public GUIWindowsComponents, public wxTimer
 {
 public:
-	SelectWindowsComponents(wxWindow* parent);
+	//server: change the components of this server (settings_fn: its settings file in urbackup/data).
+	//Empty: the client's (primary server's) settings
+	SelectWindowsComponents(wxWindow* parent, const std::string& server = std::string(),
+		const std::string& settings_fn = "settings.cfg");
 	~SelectWindowsComponents();
+
+	//Saves the selection (if it was changed)
+	void save();
+	//The tree is shown in another window (the dialog stays hidden)
+	wxWindow* takeTree(wxWindow* new_parent);
 
 	static void addComponents(wxTreeCtrl* tree, wxImageList* iconList,
 		wxTreeItemId treeId, SComponent* node, std::map<wxTreeItemId, SComponent*>& tree_components,
@@ -103,6 +111,8 @@ private:
 	int icon_height;
 
 	int use_orig;
+	std::string server;
+	bool changed;
 	int64 use_lm_orig;
 };
 

@@ -129,6 +129,27 @@ private:
 	wxButton* m_remove;
 };
 
+#ifdef _WIN32
+class SelectWindowsComponents;
+//"Components" page of a server: the Windows components backed up to this server
+class ServerComponentsPage : public wxPanel
+{
+public:
+	ServerComponentsPage(wxWindow* parent, const std::string& ident, const std::string& settings_fn, bool allow_restore);
+	~ServerComponentsPage();
+
+	//Reads the components (takes a while) the first time the page is shown
+	void load();
+	void save();
+
+private:
+	std::string ident;
+	std::string settings_fn;
+	SelectWindowsComponents* components;
+	wxStaticText* m_loading;
+};
+#endif
+
 //Settings window of the client: computer name, the servers (a click on one shows
 //its backup settings below) and the other configuration windows
 class Settings;
@@ -172,6 +193,9 @@ private:
 	std::map<std::string, Settings*> server_settings;
 	std::map<std::string, wxNotebook*> server_pages;
 	std::map<std::string, ServerPathsPage*> paths_pages;
+#ifdef _WIN32
+	std::vector<ServerComponentsPage*> components_pages;
+#endif
 	wxNotebook* current_pages;
 
 	SPathsModel paths;

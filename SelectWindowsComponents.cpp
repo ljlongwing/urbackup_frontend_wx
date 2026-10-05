@@ -16,8 +16,8 @@ extern wxString ico_ext;
 extern wxBitmapType ico_type;
 extern std::string g_res_path;
 
-SelectWindowsComponents::SelectWindowsComponents(wxWindow* parent)
-	: GUIWindowsComponents(parent)
+SelectWindowsComponents::SelectWindowsComponents(wxWindow* parent, const std::string& p_server, const std::string& settings_fn)
+	: GUIWindowsComponents(parent), server(p_server), changed(false)
 {
 	SetIcon(wxIcon(res_path + wxT("backup-ok.") + ico_ext, ico_type));
 
@@ -40,11 +40,11 @@ SelectWindowsComponents::SelectWindowsComponents(wxWindow* parent)
 	m_treeCtrl1->AddRoot(_("Loading..."));
 
 #ifdef _DEBUG
-	settings = new CFileSettingsReader("urbackup/data/settings.cfg");
+	settings = new CFileSettingsReader("urbackup/data/" + settings_fn);
 #elif _WIN32
-	settings = new CFileSettingsReader(g_res_path + "urbackup/data/settings.cfg");
+	settings = new CFileSettingsReader(g_res_path + "urbackup/data/" + settings_fn);
 #else
-	settings = new CFileSettingsReader(VARDIR "/urbackup/data/settings.cfg");
+	settings = new CFileSettingsReader(VARDIR "/urbackup/data/" + settings_fn);
 #endif
 
 	use_orig = 0;
@@ -62,6 +62,12 @@ SelectWindowsComponents::SelectWindowsComponents(wxWindow* parent)
 
 SelectWindowsComponents::~SelectWindowsComponents()
 {
+	//The reader thread may still be running (e.g. the window was closed while loading)
+	Stop();
+	if (componentReader.IsAlive())
+	{
+		componentReader.Wait();
+	}
 	delete settings;
 }
 
@@ -185,6 +191,7 @@ void SelectWindowsComponents::evtOnTreeItemGetTooltip(wxTreeEvent& event)
 
 void SelectWindowsComponents::evtOnTreeStateImageClick(wxTreeEvent& event)
 {
+	changed = true;
 	SComponent* component = tree_components[event.GetItem()];
 
 	if (component == NULL)
@@ -199,6 +206,22 @@ void SelectWindowsComponents::evtOnTreeStateImageClick(wxTreeEvent& event)
 
 void SelectWindowsComponents::onOkClick(wxCommandEvent& event)
 {
+	changed = true;
+	save();
+	Close();
+}
+
+wxWindow* SelectWindowsComponents::takeTree(wxWindow* new_parent)
+{
+	m_treeCtrl1->Reparent(new_parent);
+	return m_treeCtrl1;
+}
+
+void SelectWindowsComponents::save()
+{
+	if (!changed || componentReader.IsAlive() || componentReader.getRoot() == NULL)
+		return;
+
 	std::string res;
 	if (m_treeCtrl1->GetItemState(tree_items[componentReader.getRoot()]) == 1)
 	{
@@ -226,9 +249,8 @@ void SelectWindowsComponents::onOkClick(wxCommandEvent& event)
 		s_data += "vss_select_components.use_lm=" + nconvert(ctime) + "\n";
 	}
 
-	Connector::updateSettings(s_data);
-
-	Close();
+	Connector::updateSettings(s_data, 5000, server);
+	changed = false;
 }
 
 void SelectWindowsComponents::onCancel(wxCommandEvent& event)

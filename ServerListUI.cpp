@@ -26,6 +26,11 @@
 #include <algorithm>
 
 wxTextValidator getPathValidator(void);
+extern std::string g_res_path;
+#ifdef _WIN32
+#include "SelectWindowsComponents.h"
+HRESULT initCom();
+#endif
 
 namespace
 {
@@ -788,6 +793,49 @@ void ServerPathsPage::OnRemove(wxCommandEvent& event)
 	refresh();
 }
 
+#ifdef _WIN32
+ServerComponentsPage::ServerComponentsPage(wxWindow* parent, const std::string& ident, const std::string& settings_fn, bool allow_restore)
+	: wxPanel(parent, wxID_ANY), ident(ident), settings_fn(settings_fn), components(NULL)
+{
+	wxBoxSizer* top = new wxBoxSizer(wxVERTICAL);
+	m_loading = new wxStaticText(this, wxID_ANY, _("Loading Windows components..."));
+	top->Add(m_loading, 0, wxALL, 5);
+	if (allow_restore)
+	{
+		wxButton* restore = new wxButton(this, wxID_ANY, _("Restore components..."));
+		restore->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openRestoreComponents(this); });
+		top->Add(restore, 0, wxALL, 5);
+	}
+	SetSizer(top);
+}
+
+ServerComponentsPage::~ServerComponentsPage()
+{
+	//The tree is still a child of this page here
+	delete components;
+}
+
+void ServerComponentsPage::load()
+{
+	if (components != NULL)
+		return;
+
+	initCom();
+	//The dialog stays hidden; its tree is shown on this page
+	components = new SelectWindowsComponents(NULL, ident, settings_fn);
+	wxWindow* tree = components->takeTree(this);
+	GetSizer()->Insert(1, tree, 1, wxEXPAND | wxALL, 5);
+	m_loading->Hide();
+	Layout();
+}
+
+void ServerComponentsPage::save()
+{
+	if (components != NULL)
+		components->save();
+}
+#endif
+
 ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& server_list, int capa)
 	: wxDialog(parent, wxID_ANY, _("Settings"), wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
 	entries(server_list.entries), pending(server_list.pending), primary(server_list.primary), modified(false), capa(capa),
@@ -835,22 +883,6 @@ ClientSettingsDialog::ClientSettingsDialog(wxWindow* parent, const SServerList& 
 		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openLogs(this); });
 		bottom->Add(btn, 0, wxALL, 5);
 	}
-#ifdef _WIN32
-	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_CONFIG, capa))
-	{
-		wxButton* btn = new wxButton(this, wxID_ANY, _("Components..."));
-		btn->SetToolTip(_("Configure components to backup"));
-		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openComponents(this); });
-		bottom->Add(btn, 0, wxALL, 5);
-	}
-	if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_RESTORE, capa)
-		&& !MyTimer::hasCapability(STATUS_NO_COMPONENTS, capa))
-	{
-		wxButton* btn = new wxButton(this, wxID_ANY, _("Restore components..."));
-		btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Settings::openRestoreComponents(this); });
-		bottom->Add(btn, 0, wxALL, 5);
-	}
-#endif
 	bottom->AddStretchSpacer();
 	wxButton* ok = new wxButton(this, wxID_OK, _("Ok"));
 	wxButton* cancel = new wxButton(this, wxID_CANCEL, _("Cancel"));
@@ -1081,6 +1113,37 @@ void ClientSettingsDialog::selectServer(int idx)
 			pages->InsertPage(pos, paths_page, _("Paths"));
 			paths_pages[ident] = paths_page;
 
+#ifdef _WIN32
+			if (!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_CONFIG, server_capa))
+			{
+				//The primary server's settings are in settings.cfg
+				std::string settings_fn = "settings.cfg";
+				std::string srv_fn = "settings_srv_" + ident + ".cfg";
+				if (ident != primary
+					&& wxFileExists(wxString::FromUTF8((g_res_path + "urbackup/data/" + srv_fn).c_str())))
+				{
+					settings_fn = srv_fn;
+				}
+				ServerComponentsPage* components_page = new ServerComponentsPage(pages, ident, settings_fn,
+					!MyTimer::hasCapability(DONT_ALLOW_COMPONENT_RESTORE, server_capa)
+					&& !MyTimer::hasCapability(STATUS_NO_COMPONENTS, server_capa));
+				pages->InsertPage(pos + 1, components_page, _("Components"));
+				components_pages.push_back(components_page);
+			}
+#endif
+			//Pages that take a while to fill are filled when they are shown first
+			pages->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [pages](wxBookCtrlEvent& evt) {
+#ifdef _WIN32
+				if (evt.GetSelection() >= 0)
+				{
+					ServerComponentsPage* cp = dynamic_cast<ServerComponentsPage*>(pages->GetPage(evt.GetSelection()));
+					if (cp != NULL)
+						cp->load();
+				}
+#endif
+				evt.Skip();
+			});
+
 			//The server does not do file backups: its file backup settings and paths do not matter
 			if (MyTimer::hasCapability(DONT_DO_FILE_BACKUPS, server_capa))
 			{
@@ -1257,6 +1320,13 @@ void ClientSettingsDialog::OnOk(wxCommandEvent& event)
 			return;
 		}
 	}
+
+#ifdef _WIN32
+	for (size_t i = 0; i < components_pages.size(); ++i)
+	{
+		components_pages[i]->save();
+	}
+#endif
 
 	if (paths.modified
 		&& !Connector::saveSharedPaths(paths.dirs))
