@@ -662,8 +662,6 @@ Settings::Settings(wxWindow* parent, const std::string& server_ident, bool acces
 			for (size_t i = 0; i < choice_entries.size(); ++i)
 			{
 				wxString label = ServersPanel::displayName(choice_entries[i]);
-				if (choice_entries[i].ident == primary_server)
-					label += wxT(" ") + _("(primary)");
 				m_serverChoice->Append(label);
 				server_choice_idents.push_back(choice_entries[i].ident);
 				if (choice_entries[i].ident == selected_server)

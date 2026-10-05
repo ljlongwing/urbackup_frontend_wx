@@ -680,8 +680,6 @@ void ClientSettingsDialog::fillServers()
 		wxPanel* row = new wxPanel(m_rows, wxID_ANY);
 		wxBoxSizer* rs = new wxBoxSizer(wxHORIZONTAL);
 		wxString name = ServersPanel::displayName(e);
-		if (!primary.empty() && e.ident == primary && entries.size() > 1)
-			name += wxT(" ") + _("(primary)");
 		std::vector<wxWindow*> c;
 		c.push_back(new wxStaticText(row, wxID_ANY, name));
 		c.push_back(new wxStaticText(row, wxID_ANY, fingerprintText(e)));
